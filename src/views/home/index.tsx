@@ -50,13 +50,13 @@ export const HomeView: FC = () => {
 };
 
 const ToggleSwitch: FC<{ label: string, enabled: boolean, onChange: () => void }> = ({ label, enabled, onChange }) => (
-    <div className="flex items-center justify-between w-full p-4 bg-slate-800/80 rounded-xl border border-white/10">
-        <span className="text-white font-bold">{label}</span>
+    <div className="flex items-center justify-between w-full p-3 bg-white/5 rounded-xl border border-white/5 backdrop-blur-md transition-colors hover:bg-white/10">
+        <span className="text-white font-bold text-xs">{label}</span>
         <button
             onClick={onChange}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${ enabled ? 'bg-cyan-400' : 'bg-slate-700' }`}
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${ enabled ? 'bg-cyan-500' : 'bg-slate-700/50' }`}
         >
-            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${ enabled ? 'translate-x-5' : 'translate-x-0' }`} />
+            <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${ enabled ? 'translate-x-4' : 'translate-x-0' }`} />
         </button>
     </div>
 );
@@ -77,8 +77,8 @@ const GameSandbox: FC = () => {
     const [winner, setWinner] = useState<string | null>(null);
     const [gameMode, setGameMode] = useState<'duel' | 'survival' | 'target' | 'bossrush' | null>(null);
     const [highScores, setHighScores] = useState({ duel: 0, survival: 0, target: 0, bossrush: 0 });
-    const [menuScreen, setMenuScreen] = useState<'main' | 'settings'>('main');
-    const [settings, setSettings] = useState({ sound: true, vibration: true, difficulty: 'medium' });
+    const [menuScreen, setMenuScreen] = useState<'main' | 'settings' | 'howtoplay'>('main');
+    const [settings, setSettings] = useState({ sound: true, vibration: true, difficulty: 'medium', musicVolume: 0.3 });
     const [isPaused, setIsPaused] = useState(false);
     const [resumeCountdown, setResumeCountdown] = useState(0);
     const [timeLeft, setTimeLeft] = useState(60);
@@ -161,16 +161,16 @@ const GameSandbox: FC = () => {
         if (!bgmRef.current) {
             bgmRef.current = new Audio('bg-music.mp3');
             bgmRef.current.loop = true;
-            bgmRef.current.volume = 0.3;
+            bgmRef.current.volume = settings.musicVolume;
         }
 
         // 2. Attempt to play immediately (handles "play as i launch")
         const tryPlay = () => {
-            if (bgmRef.current && settings.sound) {
+            if (bgmRef.current && settings.musicVolume > 0) {
                 bgmRef.current.play().catch(() => {
                     // If blocked, wait for first click to start
                     const onInteract = () => {
-                        if (bgmRef.current && settings.sound) bgmRef.current.play().catch(() => {});
+                        if (bgmRef.current && settings.musicVolume > 0) bgmRef.current.play().catch(() => {});
                         window.removeEventListener('click', onInteract);
                     };
                     window.addEventListener('click', onInteract);
@@ -184,18 +184,86 @@ const GameSandbox: FC = () => {
         // 3. Manage Playback & Volume based on state
         if (!bgmRef.current) return;
 
-        if (settings.sound) {
+        if (settings.musicVolume > 0) {
             bgmRef.current.play().catch(() => {});
             // Reduce volume when paused (0.1), otherwise normal (0.3)
-            bgmRef.current.volume = isPaused ? 0.1 : 0.3;
+            bgmRef.current.volume = isPaused ? settings.musicVolume * 0.3 : settings.musicVolume;
         } else {
             bgmRef.current.pause();
         }
-    }, [gameState, isPaused, settings.sound]);
+    }, [gameState, isPaused, settings.musicVolume]);
 
     React.useEffect(() => {
         return () => { bgmRef.current?.pause(); };
     }, []);
+
+    React.useEffect(() => {
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes ripple {
+                to { transform: scale(4); opacity: 0; }
+            }
+            .ripple {
+                position: absolute;
+                border-radius: 50%;
+                transform: scale(0);
+                animation: ripple 600ms linear;
+                background-color: rgba(255, 255, 255, 0.7);
+                pointer-events: none;
+            }
+            /* Custom Scrollbar */
+            .custom-scrollbar::-webkit-scrollbar {
+                width: 4px;
+            }
+            .custom-scrollbar::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.02);
+                border-radius: 4px;
+                margin: 10px 0;
+            }
+            .custom-scrollbar::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 4px;
+            }
+            .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+        `;
+        document.head.appendChild(style);
+        return () => {
+            document.head.removeChild(style);
+        };
+    }, []);
+
+    // Handle tab visibility (Pause audio when minimized)
+    React.useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                bgmRef.current?.pause();
+            } else {
+                // Resume if settings allow and game state expects music
+                if (settings.musicVolume > 0 && (gameState === 'menu' || (gameState === 'playing' && !isPaused))) {
+                    bgmRef.current?.play().catch(() => {});
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [gameState, isPaused, settings.musicVolume]);
+
+    const createRipple = (event: React.MouseEvent<HTMLButtonElement>) => {
+        const button = event.currentTarget;
+        const circle = document.createElement("span");
+        const diameter = Math.max(button.clientWidth, button.clientHeight);
+        const radius = diameter / 2;
+        const rect = button.getBoundingClientRect();
+        circle.style.width = circle.style.height = `${diameter}px`;
+        circle.style.left = `${event.clientX - rect.left - radius}px`;
+        circle.style.top = `${event.clientY - rect.top - radius}px`;
+        circle.classList.add("ripple");
+        const existing = button.getElementsByClassName("ripple")[0];
+        if (existing) existing.remove();
+        button.appendChild(circle);
+    };
 
     const initGame = (mode: 'duel' | 'survival' | 'target' | 'bossrush') => {
         if (!containerRef.current || !canvasRef.current) return;
@@ -206,9 +274,9 @@ const GameSandbox: FC = () => {
             bgmRef.current.loop = true;
         }
         // Reset volume to normal for gameplay
-        bgmRef.current.volume = 0.3;
+        bgmRef.current.volume = settings.musicVolume;
 
-        if (settings.sound) {
+        if (settings.musicVolume > 0) {
             bgmRef.current.play().catch((e) => console.error("Start Game Audio Error:", e));
         }
 
@@ -430,6 +498,31 @@ const GameSandbox: FC = () => {
         gain.gain.exponentialRampToValueAtTime(0.001, s.audioCtx.currentTime + 0.5);
         osc.start();
         osc.stop(s.audioCtx.currentTime + 0.5);
+    };
+
+    const playHoverSound = () => {
+        if (!settings.sound) return;
+        const s = state.current;
+        if (!s.audioCtx) {
+            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+            if (AudioContext) s.audioCtx = new AudioContext();
+        }
+        if (!s.audioCtx) return;
+        if (s.audioCtx.state === 'suspended') s.audioCtx.resume();
+
+        const osc = s.audioCtx.createOscillator();
+        const gain = s.audioCtx.createGain();
+
+        osc.connect(gain);
+        gain.connect(s.audioCtx.destination);
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, s.audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, s.audioCtx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.03, s.audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, s.audioCtx.currentTime + 0.05);
+        osc.start();
+        osc.stop(s.audioCtx.currentTime + 0.05);
     };
 
     const triggerAiTaunt = () => {
@@ -1210,6 +1303,14 @@ const GameSandbox: FC = () => {
 
         if (!bgDrawn) {
             ctx.clearRect(0, 0, s.width, s.height);
+            
+            // Dynamic background tint based on music volume
+            if (settings.musicVolume > 0) {
+                const hue = 220 + (settings.musicVolume * 120); // Blue (220) -> Pink/Rose (340)
+                const alpha = settings.musicVolume * 0.2; // More opaque at higher volumes
+                ctx.fillStyle = `hsla(${hue}, 70%, 50%, ${alpha})`;
+                ctx.fillRect(0, 0, s.width, s.height);
+            }
         }
 
         // Shake offset
@@ -1232,10 +1333,10 @@ const GameSandbox: FC = () => {
         s.bricks?.forEach(b => {
             if (!b.active) return;
             ctx.fillStyle = b.color;
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = b.color;
+            // ctx.shadowBlur = 10; // Performance fix for mobile
+            // ctx.shadowColor = b.color;
             ctx.fillRect(b.x, b.y, b.w, b.h);
-            ctx.shadowBlur = 0;
+            // ctx.shadowBlur = 0;
         });
 
         // Draw Boss
@@ -1247,10 +1348,10 @@ const GameSandbox: FC = () => {
             const bossColor = `rgb(${r}, ${g}, ${b})`;
 
             ctx.fillStyle = bossColor;
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = bossColor;
+            // ctx.shadowBlur = 20;
+            // ctx.shadowColor = bossColor;
             ctx.fillRect(s.boss.x, s.boss.y, s.boss.w, s.boss.h);
-            ctx.shadowBlur = 0;
+            // ctx.shadowBlur = 0;
             
             // Health bar
             ctx.fillStyle = '#000';
@@ -1302,10 +1403,10 @@ const GameSandbox: FC = () => {
         // Draw Shield
         if (s.shieldActive) {
             ctx.fillStyle = 'rgba(59, 130, 246, 0.4)'; // a semi-transparent blue
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = '#3b82f6';
+            // ctx.shadowBlur = 15;
+            // ctx.shadowColor = '#3b82f6';
             ctx.fillRect(0, pY - 5, s.width, 5);
-            ctx.shadowBlur = 0;
+            // ctx.shadowBlur = 0;
         }
 
         // Draw Black Hole Effect
@@ -1376,15 +1477,15 @@ const GameSandbox: FC = () => {
             const aiColor = '#f472b6'; // Pink
             const glowColor = ball.lastHitBy === 'player' ? playerColor : aiColor;
 
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = glowColor;
+            // ctx.shadowBlur = 15;
+            // ctx.shadowColor = glowColor;
 
             ctx.beginPath();
             ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
             ctx.fillStyle = s.activePowerup === 'fire' ? '#f97316' : (s.activePowerup === 'bomb' ? '#ef4444' : (s.activePowerup === 'blackhole' ? '#a855f7' : '#fff'));
             ctx.fill();
 
-            ctx.shadowBlur = 0;
+            // ctx.shadowBlur = 0;
 
             // Simple trail
             const trailBaseColor = ball.lastHitBy === 'player' 
@@ -1520,14 +1621,31 @@ const GameSandbox: FC = () => {
 
                 {/* Pause Button */}
                 {gameState === 'playing' && !isPaused && (
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); setIsPaused(true); }}
-                        className="absolute top-3 right-3 p-2 text-white/50 hover:text-white bg-black/20 hover:bg-black/40 rounded-full backdrop-blur-sm transition-all z-10"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                    </button>
+                    <>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); updateSettings('sound', !settings.sound); }}
+                            className="absolute top-3 right-14 p-2 text-white/50 hover:text-white bg-black/20 hover:bg-black/40 rounded-full backdrop-blur-sm transition-all z-10"
+                        >
+                            {settings.sound ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                                </svg>
+                            )}
+                        </button>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setIsPaused(true); }}
+                            className="absolute top-3 right-3 p-2 text-white/50 hover:text-white bg-black/20 hover:bg-black/40 rounded-full backdrop-blur-sm transition-all z-10"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </button>
+                    </>
                 )}
 
                 {/* Pause Overlay */}
@@ -1542,19 +1660,24 @@ const GameSandbox: FC = () => {
                                 <h2 className="text-4xl font-black text-white mb-8 tracking-widest drop-shadow-lg">PAUSED</h2>
                                 <div className="flex flex-col gap-4 w-48">
                                     <button 
-                                        onClick={(e) => { e.stopPropagation(); setResumeCountdown(3); }}
-                                        className="px-6 py-3 bg-white text-black font-black rounded-full hover:scale-105 transition-transform shadow-lg"
+                                        onClick={(e) => { e.stopPropagation(); createRipple(e); setTimeout(() => setResumeCountdown(3), 200); }}
+                                        onMouseEnter={playHoverSound}
+                                        className="relative overflow-hidden px-6 py-3 bg-white text-black font-black rounded-full hover:scale-105 transition-transform shadow-lg"
                                     >
                                         RESUME
                                     </button>
                                     <button 
                                         onClick={(e) => {
                                             e.stopPropagation();
+                                            createRipple(e);
+                                            setTimeout(() => {
                                             setIsPaused(false);
                                             setGameState('menu');
                                             setMenuScreen('main');
+                                            }, 200);
                                         }}
-                                        className="px-6 py-3 bg-slate-800 text-white font-bold rounded-full border border-white/10 hover:bg-slate-700 transition-colors"
+                                        onMouseEnter={playHoverSound}
+                                        className="relative overflow-hidden px-6 py-3 bg-slate-800 text-white font-bold rounded-full border border-white/10 hover:bg-slate-700 transition-colors"
                                     >
                                         QUIT
                                     </button>
@@ -1572,8 +1695,20 @@ const GameSandbox: FC = () => {
                                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent pointer-events-none" />
                                 
                                 <button 
-                                    onClick={() => setMenuScreen('settings')} 
-                                    className="absolute top-4 right-4 p-2 text-slate-500 hover:text-white transition-colors hover:bg-white/10 rounded-full z-30"
+                                    onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('howtoplay'), 200); }}
+                                    onMouseEnter={playHoverSound}
+                                    className="absolute top-4 left-4 p-2 text-slate-500 hover:text-white transition-colors hover:bg-white/10 rounded-full z-30 overflow-hidden"
+                                    title="How to Play"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </button>
+
+                                <button 
+                                    onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('settings'), 200); }}
+                                    onMouseEnter={playHoverSound}
+                                    className="absolute top-4 right-4 p-2 text-slate-500 hover:text-white transition-colors hover:bg-white/10 rounded-full z-30 overflow-hidden"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -1590,28 +1725,28 @@ const GameSandbox: FC = () => {
                                 </div>
                                 <div className="w-full grid grid-cols-2 gap-3 max-w-xs">
                                     {/* Duel Button */}
-                                    <button onClick={() => initGame('duel')} className="group relative aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-cyan-400/50 transition-all hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] active:scale-[0.98]">
+                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('duel'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-cyan-400/50 transition-all hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] active:scale-[0.98]">
                                         <span className="text-3xl font-black text-cyan-400/50 group-hover:text-cyan-300 transition-colors">VS</span>
                                         <h3 className="text-sm font-bold text-white mt-1">Demolition Duel</h3>
                                         <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.duel}</span>
                                     </button>
 
                                     {/* Survival Button */}
-                                    <button onClick={() => initGame('survival')} className="group relative aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-amber-400/50 transition-all hover:shadow-[0_0_20px_rgba(251,191,36,0.15)] active:scale-[0.98]">
+                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('survival'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-amber-400/50 transition-all hover:shadow-[0_0_20px_rgba(251,191,36,0.15)] active:scale-[0.98]">
                                         <span className="text-3xl font-black text-amber-400/50 group-hover:text-amber-300 transition-colors">SOLO</span>
                                         <h3 className="text-sm font-bold text-white mt-1">Brickfall Survival</h3>
                                         <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.survival}</span>
                                     </button>
 
                                     {/* Target Button */}
-                                    <button onClick={() => initGame('target')} className="group relative aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-emerald-400/50 transition-all hover:shadow-[0_0_20px_rgba(52,211,153,0.15)] active:scale-[0.98]">
+                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('target'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-emerald-400/50 transition-all hover:shadow-[0_0_20px_rgba(52,211,153,0.15)] active:scale-[0.98]">
                                         <span className="text-3xl font-black text-emerald-400/50 group-hover:text-emerald-300 transition-colors">AIM</span>
                                         <h3 className="text-sm font-bold text-white mt-1">Target Practice</h3>
                                         <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.target}</span>
                                     </button>
 
                                     {/* Boss Rush Button */}
-                                    <button onClick={() => initGame('bossrush')} className="group relative aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-rose-400/50 transition-all hover:shadow-[0_0_20px_rgba(244,63,94,0.15)] active:scale-[0.98]">
+                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('bossrush'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-rose-400/50 transition-all hover:shadow-[0_0_20px_rgba(244,63,94,0.15)] active:scale-[0.98]">
                                         <span className="text-3xl font-black text-rose-400/50 group-hover:text-rose-300 transition-colors">BOSS</span>
                                         <h3 className="text-sm font-bold text-white mt-1">Boss Rush</h3>
                                         <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.bossrush}</span>
@@ -1619,49 +1754,134 @@ const GameSandbox: FC = () => {
                                 </div>
                             </>
                         )}
-                        {menuScreen === 'settings' && (
-                            <div className="w-full h-full flex flex-col items-center justify-center">
-                                <h2 className="text-2xl font-black text-white mb-8">SETTINGS</h2>
-                                <div className="w-full flex flex-col gap-3 max-w-xs mb-8">
-                                    <ToggleSwitch label="Sound" enabled={settings.sound} onChange={() => updateSettings('sound', !settings.sound)} />
-                                    <ToggleSwitch label="Vibration" enabled={settings.vibration} onChange={() => updateSettings('vibration', !settings.vibration)} />
-                                    
-                                    {/* Debug Audio Button */}
-                                    <button 
-                                        onClick={() => {
-                                            const audio = new Audio('bg-music.mp3');
-                                            audio.volume = 0.5;
-                                            audio.play()
-                                                .then(() => alert("🎵 Success! Music is playing. If you hear this, the file is correct."))
-                                                .catch(e => alert("❌ Error: " + e.message + "\n\nMake sure 'bg-music.mp3' is in the 'public' folder."));
-                                        }}
-                                        className="w-full py-3 mt-2 bg-slate-800 text-cyan-400 font-bold rounded-xl border border-cyan-400/30 hover:bg-slate-700 transition-colors"
-                                    >
-                                        Test Music File
-                                    </button>
+                        {menuScreen === 'howtoplay' && (
+                            <div className="w-full h-full flex flex-col items-center relative">
+                                <h2 className="text-2xl font-black text-white mb-4 mt-2 shrink-0">HOW TO PLAY</h2>
+                                
+                                <div className="w-full max-w-xs space-y-3 text-sm text-slate-300 overflow-y-auto pb-20 px-1 custom-scrollbar">
+                                    <div className="bg-slate-800/50 p-3 rounded-xl border border-white/10">
+                                        <h3 className="text-cyan-400 font-bold mb-1 text-xs uppercase tracking-wider">Controls</h3>
+                                        <ul className="list-disc pl-4 space-y-1 text-xs">
+                                            <li><strong className="text-white">Drag</strong> anywhere to move paddle.</li>
+                                            <li><strong className="text-white">Click</strong> to launch ball or release stuck ball.</li>
+                                        </ul>
+                                    </div>
 
-                                    <div className="flex flex-col gap-2 p-4 bg-slate-800/80 rounded-xl border border-white/10">
-                                        <span className="text-white font-bold">Difficulty (CPU)</span>
-                                        <div className="flex gap-2">
-                                            {['easy', 'medium', 'hard'].map((d) => (
-                                                <button
-                                                    key={d}
-                                                    onClick={() => updateSettings('difficulty', d)}
-                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase transition-colors ${
-                                                        settings.difficulty === d 
-                                                            ? 'bg-cyan-400 text-black shadow-lg' 
-                                                            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                                                    }`}
-                                                >
-                                                    {d}
-                                                </button>
-                                            ))}
+                                    <div className="bg-slate-800/50 p-3 rounded-xl border border-white/10">
+                                        <h3 className="text-pink-400 font-bold mb-2 text-xs uppercase tracking-wider">Powerups</h3>
+                                        <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-green-400 flex items-center justify-center text-[8px] text-black font-bold shrink-0">W</span> Wide Paddle</div>
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-orange-500 flex items-center justify-center text-[8px] text-black font-bold shrink-0">F</span> Fireball</div>
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-purple-400 flex items-center justify-center text-[8px] text-black font-bold shrink-0">M</span> Multiball</div>
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-rose-500 flex items-center justify-center text-[8px] text-black font-bold shrink-0">L</span> Laser</div>
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-yellow-400 flex items-center justify-center text-[8px] text-black font-bold shrink-0">S</span> Sticky</div>
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center text-[8px] text-black font-bold shrink-0">B</span> Bomb</div>
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center text-[8px] text-black font-bold shrink-0">H</span> Shield</div>
+                                            <div className="flex items-center gap-2"><span className="w-4 h-4 rounded-full bg-slate-800 border border-purple-500 flex items-center justify-center text-[8px] text-white font-bold shrink-0">BH</span> Black Hole</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-slate-800/50 p-3 rounded-xl border border-white/10">
+                                        <h3 className="text-amber-400 font-bold mb-1 text-xs uppercase tracking-wider">Modes</h3>
+                                        <ul className="space-y-1 text-[10px]">
+                                            <li><strong className="text-cyan-300">VS:</strong> Beat the AI opponent.</li>
+                                            <li><strong className="text-amber-300">SOLO:</strong> Survive the falling wall.</li>
+                                            <li><strong className="text-emerald-300">AIM:</strong> Hit targets before time runs out.</li>
+                                            <li><strong className="text-rose-300">BOSS:</strong> Defeat waves of bosses.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div className="absolute bottom-0 left-0 w-full flex justify-center bg-gradient-to-t from-slate-950 via-slate-950 to-transparent pt-8 pb-4">
+                                    <button onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('main'), 200); }} onMouseEnter={playHoverSound} className="relative overflow-hidden px-8 py-3 bg-white text-black font-black rounded-full shadow-[0_0_20px_rgba(255,255,255,0.4)] hover:scale-105 transition-transform">
+                                        BACK
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        {menuScreen === 'settings' && (
+                            <div className="w-full h-full flex flex-col items-center relative bg-slate-950/80 backdrop-blur-md">
+                                <div className="w-full pt-6 pb-2 px-6 shrink-0 bg-gradient-to-b from-slate-950 to-transparent z-10">
+                                    <h2 className="text-xl font-black tracking-tighter text-white drop-shadow-lg text-center">
+                                        SETTINGS
+                                    </h2>
+                                    <div className="h-0.5 w-8 bg-cyan-500 rounded-full mx-auto mt-2 shadow-[0_0_10px_rgba(6,182,212,0.5)]" />
+                                </div>
+                                
+                                <div className="w-full flex-1 overflow-y-auto px-5 pb-20 flex flex-col gap-4 max-w-xs custom-scrollbar">
+                                    {/* Audio Group */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2 text-cyan-400 pb-1 border-b border-white/5">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd" />
+                                            </svg>
+                                            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]">Audio</h3>
+                                        </div>
+                                        
+                                        <ToggleSwitch label="Sound Effects" enabled={settings.sound} onChange={() => updateSettings('sound', !settings.sound)} />
+                                        
+                                        <div className="flex flex-col gap-2 p-3 bg-white/5 rounded-xl border border-white/5 backdrop-blur-md transition-all hover:bg-white/10 group">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-white font-bold text-xs group-hover:text-cyan-200 transition-colors">Music Volume</span>
+                                                <span className="px-1.5 py-0.5 rounded-md bg-black/40 text-cyan-400 text-[9px] font-mono font-bold border border-white/5">{Math.round(settings.musicVolume * 100)}%</span>
+                                            </div>
+                                            <div className="relative w-full h-4 flex items-center mt-1">
+                                                <div className="absolute w-full h-1.5 bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                                                    <div className="h-full bg-gradient-to-r from-cyan-600 to-blue-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]" style={{ width: `${settings.musicVolume * 100}%` }} />
+                                                </div>
+                                                <input 
+                                                    type="range" min="0" max="1" step="0.1"
+                                                    value={settings.musicVolume}
+                                                    onChange={(e) => updateSettings('musicVolume', parseFloat(e.target.value))}
+                                                    className="absolute w-full h-full opacity-0 cursor-pointer z-10"
+                                                />
+                                                <div 
+                                                    className="absolute h-3 w-3 bg-white rounded-full shadow-lg pointer-events-none transition-all border border-cyan-500"
+                                                    style={{ left: `calc(${settings.musicVolume * 100}% - 6px)` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Gameplay Group */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2 text-pink-400 pb-1 border-b border-white/5">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                                            </svg>
+                                            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]">Gameplay</h3>
+                                        </div>
+
+                                        <ToggleSwitch label="Vibration" enabled={settings.vibration} onChange={() => updateSettings('vibration', !settings.vibration)} />
+                                        
+                                        <div className="flex flex-col gap-2 p-3 bg-white/5 rounded-xl border border-white/5 backdrop-blur-md transition-all hover:bg-white/10">
+                                            <span className="text-white font-bold text-xs">Difficulty (CPU)</span>
+                                            <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                                                {['easy', 'medium', 'hard'].map((d) => (
+                                                    <button
+                                                        key={d}
+                                                        onClick={(e) => { createRipple(e); updateSettings('difficulty', d); }}
+                                                        onMouseEnter={playHoverSound}
+                                                        className={`relative overflow-hidden flex-1 py-1.5 rounded-md text-[9px] font-black uppercase tracking-wider transition-all duration-300 ${
+                                                            settings.difficulty === d 
+                                                                ? 'bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-lg scale-100 ring-1 ring-white/20' 
+                                                                : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+                                                        }`}
+                                                    >
+                                                        {d}
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                                <button onClick={() => setMenuScreen('main')} className="px-8 py-3 bg-white text-black font-black rounded-full shadow-[0_0_20px_rgba(255,255,255,0.4)] hover:scale-105 transition-transform">
-                                    DONE
-                                </button>
+
+                                <div className="absolute bottom-0 left-0 w-full flex justify-center bg-gradient-to-t from-slate-950 via-slate-950 to-transparent pt-8 pb-6 z-10 pointer-events-none">
+                                    <button onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('main'), 200); }} onMouseEnter={playHoverSound} className="pointer-events-auto relative overflow-hidden px-8 py-2 bg-white text-black font-black rounded-full shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:scale-105 hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] transition-all active:scale-95 group text-sm">
+                                        <span className="relative z-10">DONE</span>
+                                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent -translate-x-full group-hover:animate-[shimmer_1s_infinite]" />
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -1699,8 +1919,9 @@ const GameSandbox: FC = () => {
                         <div className="flex flex-col gap-3 w-full max-w-xs">
                             <button 
                                 // Go back to menu instead of restarting same mode
-                                onClick={() => { setGameState('menu'); setMenuScreen('main'); }}
-                                className="group relative w-full px-8 py-4 bg-white text-black font-black rounded-full shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:scale-105 hover:shadow-[0_0_50px_rgba(255,255,255,0.5)] transition-all active:scale-95"
+                                onClick={(e) => { createRipple(e); setTimeout(() => { setGameState('menu'); setMenuScreen('main'); }, 200); }}
+                                onMouseEnter={playHoverSound}
+                                className="group relative overflow-hidden w-full px-8 py-4 bg-white text-black font-black rounded-full shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:scale-105 hover:shadow-[0_0_50px_rgba(255,255,255,0.5)] transition-all active:scale-95"
                             >
                                 <span className="relative z-10 flex items-center justify-center gap-2">
                                     PLAY AGAIN
@@ -1711,11 +1932,13 @@ const GameSandbox: FC = () => {
                             </button>
                             
                             <button 
-                                onClick={() => {
+                                onClick={(e) => {
+                                    createRipple(e);
                                     const text = `I scored ${scores.jen} in ${gameMode} mode on Arcade Arena! 🎮✨ #ArcadeArena`;
                                     window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
                                 }}
-                                className="w-full px-8 py-3 bg-[#1DA1F2] text-white font-bold rounded-full shadow-lg hover:scale-105 transition-transform flex items-center justify-center gap-2"
+                                onMouseEnter={playHoverSound}
+                                className="relative overflow-hidden w-full px-8 py-3 bg-[#1DA1F2] text-white font-bold rounded-full shadow-lg hover:scale-105 transition-transform flex items-center justify-center gap-2"
                             >
                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.84 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/></svg>
                                 SHARE SCORE
