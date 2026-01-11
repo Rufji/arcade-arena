@@ -66,6 +66,50 @@ const ToggleSwitch: FC<{ label: string, enabled: boolean, onChange: () => void }
 // Replace this entire GameSandbox component with the one AI generates.
 // Keep the name `GameSandbox` and the `FC` type.
 
+// Optimization: Move constants outside component to prevent recreation on every render
+const BG_COLORS: Record<string, string> = {
+    wide: '#022c22',      // teal-950
+    fire: '#431407',      // orange-950
+    laser: '#4c0519',     // rose-950
+    sticky: '#422006',    // yellow-950
+    bomb: '#450a0a',      // red-950
+    blackhole: '#1e1b4b'  // indigo-950
+};
+
+const CAMPAIGN_LEVELS = [
+    [
+        [1, 1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+    ],
+    [
+        [1, 0, 1, 1, 0, 1],
+        [0, 1, 0, 0, 1, 0],
+        [1, 0, 1, 1, 0, 1],
+        [0, 1, 0, 0, 1, 0],
+    ],
+    [
+        [0, 0, 1, 1, 0, 0],
+        [0, 1, 1, 1, 1, 0],
+        [1, 1, 1, 1, 1, 1],
+        [1, 1, 0, 0, 1, 1],
+    ],
+    [
+        [1, 1, 0, 0, 1, 1],
+        [1, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 0, 1],
+        [1, 1, 1, 1, 1, 1],
+    ],
+    [
+        [1, 0, 1, 0, 1, 0],
+        [0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0],
+        [0, 1, 0, 1, 0, 1],
+        [1, 1, 1, 1, 1, 1],
+    ]
+];
+
 const GameSandbox: FC = () => {
     const canvasRef = React.useRef<HTMLCanvasElement>(null);
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -75,8 +119,8 @@ const GameSandbox: FC = () => {
     const [scores, setScores] = useState({ jen: 0, jason: 0 });
     const [displayMultiplier, setDisplayMultiplier] = useState(1.0);
     const [winner, setWinner] = useState<string | null>(null);
-    const [gameMode, setGameMode] = useState<'duel' | 'survival' | 'target' | 'bossrush' | null>(null);
-    const [highScores, setHighScores] = useState({ duel: 0, survival: 0, target: 0, bossrush: 0 });
+    const [gameMode, setGameMode] = useState<'duel' | 'survival' | 'target' | 'bossrush' | 'campaign' | null>(null);
+    const [highScores, setHighScores] = useState({ duel: 0, survival: 0, target: 0, bossrush: 0, campaign: 0 });
     const [menuScreen, setMenuScreen] = useState<'main' | 'settings' | 'howtoplay'>('main');
     const [settings, setSettings] = useState({ sound: true, vibration: true, difficulty: 'medium', musicVolume: 0.3 });
     const [isPaused, setIsPaused] = useState(false);
@@ -85,6 +129,9 @@ const GameSandbox: FC = () => {
     const [totalScore, setTotalScore] = useState(0);
     const [displayedTotalScore, setDisplayedTotalScore] = useState(0);
     const [audioError, setAudioError] = useState<string | null>(null);
+    const [lives, setLives] = useState(3);
+    const [levelTransition, setLevelTransition] = useState<string | null>(null);
+    const [goalPopup, setGoalPopup] = useState<{ text: string, color: string } | null>(null);
 
     // Game Loop Refs
     const requestRef = React.useRef<number>();
@@ -96,7 +143,7 @@ const GameSandbox: FC = () => {
         bricks: [] as { x: number, y: number, w: number, h: number, active: boolean, color: string, vx?: number, isGolden?: boolean }[],
 
         particles: [] as { x: number, y: number, vx: number, vy: number, life: number, color: string, w?: number, h?: number }[],
-        powerups: [] as { x: number, y: number, vy: number, type: 'wide' | 'fire' | 'multiball' | 'laser' | 'sticky' | 'bomb' | 'shield' | 'blackhole', active: boolean }[],
+        powerups: [] as { x: number, y: number, vy: number, type: 'wide' | 'fire' | 'multiball' | 'laser' | 'sticky' | 'bomb' | 'shield' | 'blackhole' | 'health', active: boolean }[],
         activePowerup: null as 'wide' | 'fire' | 'laser' | 'sticky' | 'bomb' | 'blackhole' | null,
         shieldActive: false,
         lasers: [] as { x: number, y: number, vy: number }[],
@@ -106,7 +153,7 @@ const GameSandbox: FC = () => {
         width: 0,
         height: 0,
         shake: 0,
-        boss: { active: false, x: 0, y: 0, w: 0, h: 0, hp: 0, maxHp: 0, vx: 0 },
+        bosses: [] as { active: boolean, x: number, y: number, w: number, h: number, hp: number, maxHp: number, vx: number }[],
         bossProjectiles: [] as { x: number, y: number, vy: number, w: number, h: number }[],
         bossShootTimer: 0,
         bricksBroken: 0,
@@ -114,11 +161,14 @@ const GameSandbox: FC = () => {
         scoreP: 0,
         scoreO: 0,
         suddenDeath: false,
-        gameMode: null as 'duel' | 'survival' | 'target' | 'bossrush' | null,
+        gameMode: null as 'duel' | 'survival' | 'target' | 'bossrush' | 'campaign' | null,
         brickSpawnTimer: 0,
         aiTaunt: null as { text: string, timer: number } | null,
         bossLevel: 1,
         targetTimer: 0,
+        campaignLevel: 0,
+        lives: 3,
+        paddleFlashTimer: 0,
     });
 
     React.useEffect(() => {
@@ -265,7 +315,7 @@ const GameSandbox: FC = () => {
         button.appendChild(circle);
     };
 
-    const initGame = (mode: 'duel' | 'survival' | 'target' | 'bossrush') => {
+    const initGame = (mode: 'duel' | 'survival' | 'target' | 'bossrush' | 'campaign') => {
         if (!containerRef.current || !canvasRef.current) return;
         
         // Ensure audio is ready (don't reset if already playing from menu)
@@ -313,7 +363,7 @@ const GameSandbox: FC = () => {
         state.current.lasers = [];
         state.current.laserCooldown = 0;
         state.current.shieldActive = false;
-        state.current.boss = { active: false, x: 0, y: 0, w: 0, h: 0, hp: 0, maxHp: 0, vx: 0 };
+        state.current.bosses = [];
         state.current.bossProjectiles = [];
         state.current.bossShootTimer = 0;
         state.current.bricksBroken = 0;
@@ -324,32 +374,62 @@ const GameSandbox: FC = () => {
         state.current.bossLevel = 1;
         state.current.targetTimer = 60 * 60; // 60 seconds at 60fps
         setTimeLeft(60);
+        state.current.campaignLevel = 0;
+        state.current.lives = 3;
+        setLives(3);
+        state.current.paddleFlashTimer = 0;
 
         // Build Wall (Middle 30%)
-        const rows = (mode === 'target' || mode === 'bossrush') ? 0 : (mode === 'survival' ? 4 : 8);
-        const cols = 6;
-        const brickW = (width * 0.8) / cols;
-        const brickH = (height * 0.25) / rows;
-        const startX = width * 0.1;
-        const startY = mode === 'survival' ? height * 0.15 : height * 0.35;
-        
         const newBricks = [];
         const colors = ['#f472b6', '#c084fc', '#818cf8', '#22d3ee'];
-        for(let r=0; r<rows; r++) {
-            for(let c=0; c<cols; c++) {
-                newBricks.push({
-                    x: startX + c * brickW,
-                    y: startY + r * brickH,
-                    w: brickW - 2,
-                    h: brickH - 2,
-                    active: true,
-                    color: colors[r % colors.length]
-                });
+
+        if (mode === 'campaign') {
+            const levelLayout = CAMPAIGN_LEVELS[0];
+            const rows = levelLayout.length;
+            const cols = levelLayout[0].length;
+            const brickW = (width * 0.8) / cols;
+            const brickH = (height * 0.25) / 8; // Fixed height ref
+            const startX = width * 0.1;
+            const startY = height * 0.15;
+
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<cols; c++) {
+                    if (levelLayout[r][c] === 1) {
+                        newBricks.push({
+                            x: startX + c * brickW,
+                            y: startY + r * brickH,
+                            w: brickW - 2,
+                            h: brickH - 2,
+                            active: true,
+                            color: colors[r % colors.length]
+                        });
+                    }
+                }
+            }
+        } else {
+            const rows = (mode === 'target' || mode === 'bossrush') ? 0 : (mode === 'survival' ? 4 : 8);
+            const cols = 6;
+            const brickW = (width * 0.8) / cols;
+            const brickH = (height * 0.25) / rows;
+            const startX = width * 0.1;
+            const startY = mode === 'survival' ? height * 0.15 : height * 0.35;
+            
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<cols; c++) {
+                    newBricks.push({
+                        x: startX + c * brickW,
+                        y: startY + r * brickH,
+                        w: brickW - 2,
+                        h: brickH - 2,
+                        active: true,
+                        color: colors[r % colors.length]
+                    });
+                }
             }
         }
         state.current.bricks = newBricks;
 
-        if (mode === 'survival' || mode === 'target' || mode === 'bossrush') {
+        if (mode === 'survival' || mode === 'target' || mode === 'bossrush' || mode === 'campaign') {
             state.current.paddleO.w = 0; // Hide AI paddle
             state.current.brickSpawnTimer = mode === 'target' ? 60 : 400; 
         } else {
@@ -357,7 +437,7 @@ const GameSandbox: FC = () => {
         }
 
         if (mode === 'bossrush') {
-            state.current.boss = {
+            state.current.bosses.push({
                 active: true,
                 x: width / 2 - 60,
                 y: height * 0.15,
@@ -366,7 +446,7 @@ const GameSandbox: FC = () => {
                 hp: 50,
                 maxHp: 50,
                 vx: 3
-            };
+            });
         }
         
         setScores({ jen: 0, jason: 0 });
@@ -375,6 +455,86 @@ const GameSandbox: FC = () => {
         setWinner(null);
         setIsPaused(false);
         setResumeCountdown(0);
+    };
+
+    const startNextLevel = () => {
+        const s = state.current;
+        s.campaignLevel++;
+        s.lives = Math.min(3, s.lives + 1); // Heal 1 life, max 3
+        setLives(s.lives);
+        
+        setLevelTransition(`LEVEL ${s.campaignLevel + 1}`);
+        setTimeout(() => setLevelTransition(null), 2000);
+        playLevelUpSound();
+
+        const w = s.width;
+        const h = s.height;
+
+        // Reset ball
+        resetBall(false);
+        
+        // Clear entities for clean level start
+        s.bosses = [];
+        s.bossProjectiles = [];
+        s.lasers = [];
+        s.powerups = [];
+        s.particles = [];
+        s.bricksBroken = 0;
+
+        // Difficulty: Shrink paddle by 2% per level (min 10% width)
+        s.paddleP.w = Math.max(0.1, 0.2 - (s.campaignLevel * 0.02));
+
+        // Generate bricks for next level
+        const levelLayout = CAMPAIGN_LEVELS[s.campaignLevel];
+        const newBricks = [];
+        const colors = ['#f472b6', '#c084fc', '#818cf8', '#22d3ee'];
+        const rows = levelLayout.length;
+        const cols = levelLayout[0].length;
+        const brickW = (w * 0.8) / cols;
+        const brickH = (h * 0.25) / 8;
+        const startX = w * 0.1;
+        const startY = h * 0.15;
+
+        for(let r=0; r<rows; r++) {
+            for(let c=0; c<cols; c++) {
+                if (levelLayout[r][c] === 1) {
+                    newBricks.push({
+                        x: startX + c * brickW,
+                        y: startY + r * brickH,
+                        w: brickW - 2,
+                        h: brickH - 2,
+                        active: true,
+                        color: colors[r % colors.length]
+                    });
+                }
+            }
+        }
+        s.bricks = newBricks;
+
+        // Boss Spawning for Campaign
+        if (s.campaignLevel === 2) { // Level 3
+            s.bosses.push({
+                active: true,
+                x: w / 2 - 60,
+                y: h * 0.15,
+                w: 120,
+                h: 60,
+                hp: 80,
+                maxHp: 80,
+                vx: 3
+            });
+        } else if (s.campaignLevel === 4) { // Level 5 (Final)
+            s.bosses.push({
+                active: true, x: w * 0.3 - 50, y: h * 0.15, w: 100, h: 50, hp: 100, maxHp: 100, vx: 2
+            });
+            s.bosses.push({
+                active: true, x: w * 0.7 - 50, y: h * 0.25, w: 100, h: 50, hp: 100, maxHp: 100, vx: -2
+            });
+        }
+        
+        // Visual feedback
+        s.shake = 20;
+        vibrate([50, 50, 50]);
     };
 
     const spawnParticles = (x: number, y: number, color: string) => {
@@ -425,104 +585,122 @@ const GameSandbox: FC = () => {
         }
     };
 
-    const playBrickSound = () => {
-        if (!settings.sound) return;
+    // Helper to initialize audio context once
+    const ensureAudioContext = () => {
         const s = state.current;
         if (!s.audioCtx) {
             const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
             if (AudioContext) s.audioCtx = new AudioContext();
         }
-        if (!s.audioCtx) return;
-        if (s.audioCtx.state === 'suspended') s.audioCtx.resume();
+        if (s.audioCtx && s.audioCtx.state === 'suspended') {
+            s.audioCtx.resume();
+        }
+        return s.audioCtx;
+    };
 
-        const osc = s.audioCtx.createOscillator();
-        const gain = s.audioCtx.createGain();
+    const playBrickSound = () => {
+        if (!settings.sound) return;
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
         osc.connect(gain);
-        gain.connect(s.audioCtx.destination);
+        gain.connect(ctx.destination);
 
         osc.type = 'square';
-        osc.frequency.setValueAtTime(400 + Math.random() * 200, s.audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(100, s.audioCtx.currentTime + 0.1);
-        gain.gain.setValueAtTime(0.05, s.audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, s.audioCtx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(400 + Math.random() * 200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
         osc.start();
-        osc.stop(s.audioCtx.currentTime + 0.1);
+        osc.stop(ctx.currentTime + 0.1);
     };
 
     const playAiScoreSound = () => {
         if (!settings.sound) return;
-        const s = state.current;
-        if (!s.audioCtx) {
-            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-            if (AudioContext) s.audioCtx = new AudioContext();
-        }
-        if (!s.audioCtx) return;
-        if (s.audioCtx.state === 'suspended') s.audioCtx.resume();
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
 
-        const osc = s.audioCtx.createOscillator();
-        const gain = s.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
         osc.connect(gain);
-        gain.connect(s.audioCtx.destination);
+        gain.connect(ctx.destination);
 
         osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(150, s.audioCtx.currentTime);
-        osc.frequency.linearRampToValueAtTime(50, s.audioCtx.currentTime + 0.2);
-        gain.gain.setValueAtTime(0.05, s.audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, s.audioCtx.currentTime + 0.2);
+        osc.frequency.setValueAtTime(150, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(50, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
         osc.start();
-        osc.stop(s.audioCtx.currentTime + 0.2);
+        osc.stop(ctx.currentTime + 0.2);
     };
 
     const playGoldenSound = () => {
         if (!settings.sound) return;
-        const s = state.current;
-        if (!s.audioCtx) {
-            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-            if (AudioContext) s.audioCtx = new AudioContext();
-        }
-        if (!s.audioCtx) return;
-        if (s.audioCtx.state === 'suspended') s.audioCtx.resume();
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
 
-        const osc = s.audioCtx.createOscillator();
-        const gain = s.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
         osc.connect(gain);
-        gain.connect(s.audioCtx.destination);
+        gain.connect(ctx.destination);
 
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, s.audioCtx.currentTime); // A5
-        osc.frequency.exponentialRampToValueAtTime(1760, s.audioCtx.currentTime + 0.1); // A6
-        gain.gain.setValueAtTime(0.1, s.audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, s.audioCtx.currentTime + 0.5);
+        osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+        osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.1); // A6
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
         osc.start();
-        osc.stop(s.audioCtx.currentTime + 0.5);
+        osc.stop(ctx.currentTime + 0.5);
     };
 
     const playHoverSound = () => {
         if (!settings.sound) return;
-        const s = state.current;
-        if (!s.audioCtx) {
-            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-            if (AudioContext) s.audioCtx = new AudioContext();
-        }
-        if (!s.audioCtx) return;
-        if (s.audioCtx.state === 'suspended') s.audioCtx.resume();
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
 
-        const osc = s.audioCtx.createOscillator();
-        const gain = s.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
         osc.connect(gain);
-        gain.connect(s.audioCtx.destination);
+        gain.connect(ctx.destination);
 
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(600, s.audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(800, s.audioCtx.currentTime + 0.05);
-        gain.gain.setValueAtTime(0.03, s.audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, s.audioCtx.currentTime + 0.05);
+        osc.frequency.setValueAtTime(600, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.03, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
         osc.start();
-        osc.stop(s.audioCtx.currentTime + 0.05);
+        osc.stop(ctx.currentTime + 0.05);
+    };
+
+    const playLevelUpSound = () => {
+        if (!settings.sound) return;
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
+
+        const t = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, t);
+        osc.frequency.setValueAtTime(554, t + 0.1);
+        osc.frequency.setValueAtTime(659, t + 0.2);
+        osc.frequency.setValueAtTime(880, t + 0.3);
+
+        gain.gain.setValueAtTime(0.1, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+
+        osc.start(t);
+        osc.stop(t + 0.6);
     };
 
     const triggerAiTaunt = () => {
@@ -558,7 +736,7 @@ const GameSandbox: FC = () => {
         const s = state.current;
         const mode = s.gameMode;
         if (mode) {
-            const saved = JSON.parse(localStorage.getItem('arcadeHighScores') || '{"duel":0,"survival":0,"target":0,"bossrush":0}');
+            const saved = JSON.parse(localStorage.getItem('arcadeHighScores') || '{"duel":0,"survival":0,"target":0,"bossrush":0,"campaign":0}');
             if (s.scoreP > (saved[mode] || 0)) {
                 saved[mode] = s.scoreP;
                 localStorage.setItem('arcadeHighScores', JSON.stringify(saved));
@@ -575,6 +753,16 @@ const GameSandbox: FC = () => {
         const w = s.width;
         const h = s.height;
         const pY = h * (1 - 0.05);
+        let lastBallOutDir = 0;
+
+        // Track score change to update UI
+        const prevScoreP = s.scoreP;
+        const prevScoreO = s.scoreO;
+
+        // Optimization: Track changes to avoid unnecessary React state updates
+        const initialScoreP = s.scoreP;
+        const initialScoreO = s.scoreO;
+        const initialMultiplier = s.multiplier;
 
         if (s.gameMode === 'survival') {
             s.brickSpawnTimer--;
@@ -665,24 +853,32 @@ const GameSandbox: FC = () => {
         }
 
         // Boss Movement
-        if (s.boss.active) {
-            s.boss.x += s.boss.vx;
-            if (s.boss.x <= 0 || s.boss.x + s.boss.w >= w) {
-                s.boss.vx *= -1;
+        s.bosses.forEach(boss => {
+            if (!boss.active) return;
+            boss.x += boss.vx;
+            if (boss.x <= 0 || boss.x + boss.w >= w) {
+                boss.vx *= -1;
             }
-            
-            s.bossShootTimer--;
-            if (s.bossShootTimer <= 0) {
-                if (!s.bossProjectiles) s.bossProjectiles = [];
+        });
+
+        s.bossShootTimer--;
+        if (s.bossShootTimer <= 0) {
+            if (!s.bossProjectiles) s.bossProjectiles = [];
+            let anyRage = false;
+            s.bosses.forEach(boss => {
+                if (!boss.active) return;
+                const isRage = boss.hp < boss.maxHp * 0.4;
+                if (isRage) anyRage = true;
+
                 s.bossProjectiles.push({
-                    x: s.boss.x + s.boss.w / 2 - 4,
-                    y: s.boss.y + s.boss.h,
-                    vy: 5,
-                    w: 8,
-                    h: 16
+                    x: boss.x + boss.w / 2 - (isRage ? 5 : 4),
+                    y: boss.y + boss.h,
+                    vy: isRage ? 8 : 5,
+                    w: isRage ? 10 : 8,
+                    h: isRage ? 20 : 16
                 });
-                s.bossShootTimer = 40 + Math.random() * 40;
-            }
+            });
+            s.bossShootTimer = anyRage ? (20 + Math.random() * 20) : (40 + Math.random() * 40);
         }
 
         // Update Boss Projectiles
@@ -697,10 +893,25 @@ const GameSandbox: FC = () => {
             // Collision with Player
             if (p.y + p.h >= pY && p.y <= pY + 15 && p.x + p.w >= pX_proj && p.x <= pX_proj + pW_proj) {
                 s.shake = 20;
-                s.multiplier = 1.0;
+                s.multiplier = 1.0; // Handled at end of frame
                 setDisplayMultiplier(1.0);
                 s.bossProjectiles.splice(i, 1);
                 vibrate([50, 30, 50]);
+
+                // Damage Logic
+                if (s.gameMode === 'campaign') {
+                    if (s.lives > 1) {
+                        s.lives--;
+                        setLives(s.lives);
+                        s.paddleFlashTimer = 20;
+                    } else {
+                        handleGameOver('Defeated');
+                        return;
+                    }
+                } else if (s.gameMode === 'bossrush' || s.gameMode === 'survival') {
+                    handleGameOver('Defeated');
+                    return;
+                }
                 continue;
             }
             
@@ -734,38 +945,51 @@ const GameSandbox: FC = () => {
             ball.y += ball.vy * s.multiplier;
 
             // Boss Collision
-            if (s.boss.active) {
-                if (ball.x + ball.radius > s.boss.x && ball.x - ball.radius < s.boss.x + s.boss.w &&
-                    ball.y + ball.radius > s.boss.y && ball.y - ball.radius < s.boss.y + s.boss.h) {
+            for (const boss of s.bosses) {
+                if (boss.active) {
+                    if (ball.x + ball.radius > boss.x && ball.x - ball.radius < boss.x + boss.w &&
+                        ball.y + ball.radius > boss.y && ball.y - ball.radius < boss.y + boss.h) {
                     
-                    s.boss.hp--;
+                        boss.hp--;
                     
-                    const ratio = Math.max(0, s.boss.hp / s.boss.maxHp);
-                    const r = Math.floor(239 + (168 - 239) * ratio);
-                    const g = Math.floor(68 + (85 - 68) * ratio);
-                    const b = Math.floor(68 + (247 - 68) * ratio);
-                    const bossColor = `rgb(${r}, ${g}, ${b})`;
-                    spawnParticles(ball.x, ball.y, bossColor);
-                    s.shake = 5;
+                        const ratio = Math.max(0, boss.hp / boss.maxHp);
+                        const r = Math.floor(239 + (168 - 239) * ratio);
+                        const g = Math.floor(68 + (85 - 68) * ratio);
+                        const b = Math.floor(68 + (247 - 68) * ratio);
+                        const bossColor = `rgb(${r}, ${g}, ${b})`;
+                        spawnParticles(ball.x, ball.y, bossColor);
+                        s.shake = 5;
                     
-                    const overlapX = Math.min(Math.abs(ball.x - s.boss.x), Math.abs(ball.x - (s.boss.x + s.boss.w)));
-                    const overlapY = Math.min(Math.abs(ball.y - s.boss.y), Math.abs(ball.y - (s.boss.y + s.boss.h)));
+                        const overlapX = Math.min(Math.abs(ball.x - boss.x), Math.abs(ball.x - (boss.x + boss.w)));
+                        const overlapY = Math.min(Math.abs(ball.y - boss.y), Math.abs(ball.y - (boss.y + boss.h)));
                     
-                    if (overlapX < overlapY) ball.vx *= -1;
-                    else ball.vy *= -1;
+                        if (overlapX < overlapY) ball.vx *= -1;
+                        else ball.vy *= -1;
 
-                    if (s.boss.hp <= 0) {
-                        s.boss.active = false;
-                        s.shake = 20;
+                        // Boss Rush: Chance to drop powerup on hit (since there are no bricks)
+                        if (s.gameMode === 'bossrush' && Math.random() < 0.08) {
+                            const types = ['wide', 'fire', 'multiball', 'laser', 'sticky', 'bomb', 'shield', 'blackhole', 'health'] as const;
+                            s.powerups.push({
+                                x: boss.x + boss.w/2,
+                                y: boss.y + boss.h/2,
+                                vy: 2,
+                                type: types[Math.floor(Math.random() * types.length)],
+                                active: true
+                            });
+                        }
+
+                        if (boss.hp <= 0) {
+                            boss.active = false;
+                            s.shake = 20;
                         
-                        if (s.gameMode === 'bossrush') {
+                            if (s.gameMode === 'bossrush') {
                             s.scoreP += 500 * s.bossLevel;
                             addScore(500 * s.bossLevel);
                             setScores({ jen: s.scoreP, jason: s.scoreO });
                             s.bossLevel++;
                             
                             // Spawn next boss
-                            s.boss = {
+                            s.bosses.push({
                                 active: true,
                                 x: w / 2 - 60,
                                 y: h * 0.15,
@@ -774,23 +998,24 @@ const GameSandbox: FC = () => {
                                 hp: 50 + (s.bossLevel * 25),
                                 maxHp: 50 + (s.bossLevel * 25),
                                 vx: 3 + (s.bossLevel * 0.5)
-                            };
+                            });
                             
                             s.powerups.push({
-                                x: s.boss.x + s.boss.w/2,
-                                y: s.boss.y + s.boss.h/2,
+                                x: boss.x + boss.w/2,
+                                y: boss.y + boss.h/2,
                                 vy: 2,
                                 type: 'multiball',
                                 active: true
                             });
-                        } else {
-                            s.powerups.push({
-                                x: s.boss.x + s.boss.w/2,
-                                y: s.boss.y + s.boss.h/2,
-                                vy: 2,
-                                type: 'multiball',
-                                active: true
-                            });
+                            } else {
+                                s.powerups.push({
+                                    x: boss.x + boss.w/2,
+                                    y: boss.y + boss.h/2,
+                                    vy: 2,
+                                    type: 'multiball',
+                                    active: true
+                                });
+                            }
                         }
                     }
                 }
@@ -825,7 +1050,7 @@ const GameSandbox: FC = () => {
                         const hitPoint = (ball.x - (pX + pW/2)) / (pW/2);
                         ball.vx = hitPoint * 6;
                         s.multiplier = Math.min(3.0, s.multiplier + 0.1);
-                        setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1)));
+                        // setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1))); // Handled at end of frame
                         s.shake = 5;
                         ball.lastHitBy = 'player';
                         vibrate(20);
@@ -846,7 +1071,7 @@ const GameSandbox: FC = () => {
                         const hitPoint = (ball.x - (oX + oW/2)) / (oW/2);
                         ball.vx = hitPoint * 6;
                         s.multiplier = Math.min(3.0, s.multiplier + 0.1);
-                        ball.lastHitBy = 'ai';
+                        ball.lastHitBy = 'ai'; // Handled at end of frame
                         setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1)));
                         vibrate(20);
                     }
@@ -889,10 +1114,9 @@ const GameSandbox: FC = () => {
                             playBrickSound();
                         }
                     }
-                    setScores({ jen: s.scoreP, jason: s.scoreO });
 
-                    if (s.bricksBroken > 0 && s.bricksBroken % 50 === 0 && !s.boss.active) {
-                        s.boss = {
+                    if (s.gameMode === 'survival' && s.bricksBroken > 0 && s.bricksBroken % 50 === 0 && s.bosses.every(b => !b.active)) {
+                        s.bosses.push({
                             active: true,
                             x: w / 2 - 60,
                             y: h / 3,
@@ -901,7 +1125,7 @@ const GameSandbox: FC = () => {
                             hp: 20,
                             maxHp: 20,
                             vx: 2
-                        };
+                        });
                     }
 
                     if (s.gameMode === 'target' && b.isGolden) {
@@ -930,7 +1154,6 @@ const GameSandbox: FC = () => {
                                     addScore(1);
                                     playBrickSound();
                                 }
-                                setScores({ jen: s.scoreP, jason: s.scoreO });
                             }
                         }
                         s.shake = 10;
@@ -938,7 +1161,7 @@ const GameSandbox: FC = () => {
 
                     // Spawn Powerup (15% chance)
                     if (Math.random() < 0.15) {
-                        const types = ['wide', 'fire', 'multiball', 'laser', 'sticky', 'bomb', 'shield', 'blackhole'] as const;
+                        const types = ['wide', 'fire', 'multiball', 'laser', 'sticky', 'bomb', 'shield', 'blackhole', 'health'] as const;
                         s.powerups.push({
                             x: b.x + b.w/2,
                             y: b.y + b.h/2,
@@ -963,7 +1186,7 @@ const GameSandbox: FC = () => {
             }
             if (hitBrick) {
                 s.multiplier += 0.02;
-                setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1)));
+                // setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1))); // Handled at end of frame
             }
 
             // 5. Scoring (Goals)
@@ -979,9 +1202,26 @@ const GameSandbox: FC = () => {
                         return;
                     }
                     s.balls.splice(i, 1);
+                    lastBallOutDir = 1;
+
+                    if (s.gameMode === 'duel') {
+                        s.scoreO += 10;
+                        triggerAiTaunt();
+                        playAiScoreSound();
+                        setGoalPopup({ text: 'GOAL!', color: '#f472b6' });
+                        setTimeout(() => setGoalPopup(null), 1000);
+                    }
                 }
             } else if (ball.y < -20) {
                 s.balls.splice(i, 1);
+                lastBallOutDir = -1;
+                if (s.gameMode === 'duel') {
+                    s.scoreP += 10;
+                    addScore(10);
+                    playBrickSound();
+                    setGoalPopup({ text: 'GOAL!', color: '#38bdf8' });
+                    setTimeout(() => setGoalPopup(null), 1000);
+                }
             }
         }
 
@@ -989,8 +1229,17 @@ const GameSandbox: FC = () => {
             if (s.gameMode === 'survival' || s.gameMode === 'bossrush') {
                 handleGameOver(s.gameMode === 'survival' ? 'The Void' : 'Defeated');
                 return;
+            } else if (s.gameMode === 'campaign') {
+                if (s.lives > 1) {
+                    s.lives--;
+                    setLives(s.lives);
+                    resetBall(true);
+                } else {
+                    handleGameOver('Defeated');
+                    return;
+                }
             } else {
-                resetBall(true);
+                resetBall(lastBallOutDir !== -1);
             }
         }
 
@@ -1042,10 +1291,9 @@ const GameSandbox: FC = () => {
                         addScore(1);
                         playBrickSound();
                     }
-                    setScores({ jen: s.scoreP, jason: s.scoreO });
 
                     if (Math.random() < 0.1) {
-                        const types = ['wide', 'fire', 'multiball', 'laser', 'blackhole'] as const;
+                        const types = ['wide', 'fire', 'multiball', 'laser', 'blackhole', 'health'] as const;
                         s.powerups.push({
                             x: b.x + b.w/2,
                             y: b.y + b.h/2,
@@ -1139,6 +1387,7 @@ const GameSandbox: FC = () => {
             // Collision with player paddle
             if (p.active && p.y >= pY && p.y <= pY + 20 && p.x >= pX && p.x <= pX + pW) {
                 p.active = false;
+                s.paddleFlashTimer = 45;
                 if (p.type === 'shield') {
                     s.shieldActive = true;
                 }
@@ -1149,6 +1398,9 @@ const GameSandbox: FC = () => {
                         newBalls.push({ ...b, vx: b.vx + 2, vy: b.vy });
                     });
                     s.balls.push(...newBalls);
+                } else if (p.type === 'health') {
+                    s.lives = Math.min(3, s.lives + 1);
+                    setLives(s.lives);
                 } else {
                     s.activePowerup = p.type;
                     s.powerupTimer = 600; // 10 seconds at 60fps
@@ -1192,6 +1444,9 @@ const GameSandbox: FC = () => {
         if (s.shake > 0) s.shake *= 0.9;
         if (s.shake < 0.5) s.shake = 0;
 
+        // Flash decay
+        if (s.paddleFlashTimer > 0) s.paddleFlashTimer--;
+
         // AI Taunt timer
         if (s.aiTaunt && s.aiTaunt.timer > 0) {
             s.aiTaunt.timer--;
@@ -1200,7 +1455,19 @@ const GameSandbox: FC = () => {
         }
 
         // Win Condition
-        if (s.gameMode === 'duel' && s.bricks.length > 0 && s.bricks.every(b => !b.active)) {
+        const allBricksBroken = s.bricks.length > 0 && s.bricks.every(b => !b.active);
+        
+        if (s.gameMode === 'campaign' && allBricksBroken && s.bosses.every(b => !b.active)) {
+            if (s.campaignLevel < CAMPAIGN_LEVELS.length - 1) {
+                startNextLevel();
+                return;
+            } else {
+                handleGameOver('Champion');
+                return;
+            }
+        }
+
+        if (s.gameMode === 'duel' && allBricksBroken) {
             if (s.scoreP === s.scoreO) {
                 if (!s.suddenDeath) {
                     s.suddenDeath = true;
@@ -1229,6 +1496,11 @@ const GameSandbox: FC = () => {
             } else {
                 handleGameOver(s.scoreP > s.scoreO ? 'Player' : 'CPU');
             }
+        }
+
+        // Update UI if scores changed
+        if (s.scoreP !== prevScoreP || s.scoreO !== prevScoreO) {
+            setScores({ jen: s.scoreP, jason: s.scoreO });
         }
     };
 
@@ -1263,7 +1535,14 @@ const GameSandbox: FC = () => {
             lastHitBy: playerLost ? 'ai' : 'player',
         }];
         s.multiplier = 1.0;
-        setDisplayMultiplier(1.0);
+        // Difficulty: Increase speed by 15% per level in Campaign
+        if (s.gameMode === 'campaign') {
+            s.multiplier = 1.0 + (s.campaignLevel * 0.15);
+        } else {
+            s.multiplier = 1.0;
+        }
+
+        setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1)));
         s.activePowerup = null;
         s.powerupTimer = 0;
         s.powerups = [];
@@ -1279,17 +1558,9 @@ const GameSandbox: FC = () => {
         const s = state.current;
 
         // Background
+        const color = s.activePowerup ? BG_COLORS[s.activePowerup] : null;
         let bgDrawn = false;
-        if (s.activePowerup) {
-            const bgColors: Record<string, string> = {
-                wide: '#022c22',      // teal-950
-                fire: '#431407',      // orange-950
-                laser: '#4c0519',     // rose-950
-                sticky: '#422006',    // yellow-950
-                bomb: '#450a0a',      // red-950
-                blackhole: '#1e1b4b'  // indigo-950
-            };
-            const color = bgColors[s.activePowerup];
+        if (color) {
             if (color) {
                 ctx.fillStyle = color;
                 ctx.fillRect(0, 0, s.width, s.height);
@@ -1340,42 +1611,40 @@ const GameSandbox: FC = () => {
         });
 
         // Draw Boss
-        if (s.boss.active) {
-            const ratio = Math.max(0, s.boss.hp / s.boss.maxHp);
+        s.bosses.forEach(boss => {
+            if (!boss.active) return;
+            const ratio = Math.max(0, boss.hp / boss.maxHp);
             const r = Math.floor(239 + (168 - 239) * ratio);
             const g = Math.floor(68 + (85 - 68) * ratio);
             const b = Math.floor(68 + (247 - 68) * ratio);
             const bossColor = `rgb(${r}, ${g}, ${b})`;
 
             ctx.fillStyle = bossColor;
-            // ctx.shadowBlur = 20;
-            // ctx.shadowColor = bossColor;
-            ctx.fillRect(s.boss.x, s.boss.y, s.boss.w, s.boss.h);
-            // ctx.shadowBlur = 0;
+            ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
             
             // Health bar
             ctx.fillStyle = '#000';
-            ctx.fillRect(s.boss.x, s.boss.y - 10, s.boss.w, 6);
+            ctx.fillRect(boss.x, boss.y - 10, boss.w, 6);
             ctx.fillStyle = '#22c55e';
-            ctx.fillRect(s.boss.x, s.boss.y - 10, s.boss.w * (s.boss.hp / s.boss.maxHp), 6);
+            ctx.fillRect(boss.x, boss.y - 10, boss.w * (boss.hp / boss.maxHp), 6);
             
             // Face
             ctx.fillStyle = '#000';
             ctx.beginPath();
-            ctx.arc(s.boss.x + s.boss.w * 0.3, s.boss.y + s.boss.h * 0.4, 6, 0, Math.PI*2);
-            ctx.arc(s.boss.x + s.boss.w * 0.7, s.boss.y + s.boss.h * 0.4, 6, 0, Math.PI*2);
+            ctx.arc(boss.x + boss.w * 0.3, boss.y + boss.h * 0.4, 6, 0, Math.PI*2);
+            ctx.arc(boss.x + boss.w * 0.7, boss.y + boss.h * 0.4, 6, 0, Math.PI*2);
             ctx.fill();
             ctx.beginPath();
-            ctx.moveTo(s.boss.x + s.boss.w * 0.3, s.boss.y + s.boss.h * 0.7);
-            ctx.lineTo(s.boss.x + s.boss.w * 0.7, s.boss.y + s.boss.h * 0.7);
+            ctx.moveTo(boss.x + boss.w * 0.3, boss.y + boss.h * 0.7);
+            ctx.lineTo(boss.x + boss.w * 0.7, boss.y + boss.h * 0.7);
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 3;
             ctx.stroke();
-        }
+        });
 
         // Draw Boss Projectiles
-        ctx.fillStyle = '#fbbf24';
         s.bossProjectiles?.forEach(p => {
+            ctx.fillStyle = p.vy > 6 ? '#ef4444' : '#fbbf24';
             ctx.fillRect(p.x, p.y, p.w, p.h);
         });
 
@@ -1389,13 +1658,13 @@ const GameSandbox: FC = () => {
         s.powerups?.forEach(p => {
             ctx.beginPath();
             ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-            ctx.fillStyle = p.type === 'wide' ? '#4ade80' : (p.type === 'fire' ? '#f97316' : (p.type === 'multiball' ? '#c084fc' : (p.type === 'laser' ? '#f43f5e' : (p.type === 'sticky' ? '#facc15' : (p.type === 'bomb' ? '#ef4444' : (p.type === 'blackhole' ? '#1e293b' : '#3b82f6'))))));
+            ctx.fillStyle = p.type === 'wide' ? '#4ade80' : (p.type === 'fire' ? '#f97316' : (p.type === 'multiball' ? '#c084fc' : (p.type === 'laser' ? '#f43f5e' : (p.type === 'sticky' ? '#facc15' : (p.type === 'bomb' ? '#ef4444' : (p.type === 'blackhole' ? '#1e293b' : (p.type === 'health' ? '#be123c' : '#3b82f6')))))));
             ctx.fill();
             ctx.fillStyle = '#000';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(p.type === 'wide' ? 'W' : (p.type === 'fire' ? 'F' : (p.type === 'multiball' ? 'M' : (p.type === 'laser' ? 'L' : (p.type === 'sticky' ? 'S' : (p.type === 'bomb' ? 'B' : (p.type === 'blackhole' ? 'BH' : 'H')))))), p.x, p.y);
+            ctx.fillText(p.type === 'wide' ? 'W' : (p.type === 'fire' ? 'F' : (p.type === 'multiball' ? 'M' : (p.type === 'laser' ? 'L' : (p.type === 'sticky' ? 'S' : (p.type === 'bomb' ? 'B' : (p.type === 'blackhole' ? 'BH' : (p.type === 'health' ? '+' : 'H'))))))), p.x, p.y);
         });
 
         const pY = s.height * (1 - 0.05);
@@ -1421,7 +1690,12 @@ const GameSandbox: FC = () => {
         }
 
         // Draw Paddles
-        ctx.fillStyle = '#38bdf8'; // Cyan for Player
+        if (s.paddleFlashTimer > 0) {
+            const colors = ['#ffffff', '#facc15', '#f472b6', '#38bdf8'];
+            ctx.fillStyle = colors[Math.floor(s.paddleFlashTimer / 3) % colors.length];
+        } else {
+            ctx.fillStyle = '#38bdf8'; // Cyan for Player
+        }
         const effectivePW = s.activePowerup === 'wide' ? s.paddleP.w * 1.5 : s.paddleP.w;
         const pW = s.width * effectivePW;
         const pX = s.width * s.paddleP.x - pW/2;
@@ -1513,7 +1787,7 @@ const GameSandbox: FC = () => {
 
     const loop = () => {
         if (gameState === 'playing') {
-            if (!isPaused) {
+            if (!isPaused && !levelTransition) {
                 update();
             } else if (state.current.shake > 0) {
                 // Allow shake to decay even when paused (for countdown effect)
@@ -1530,7 +1804,7 @@ const GameSandbox: FC = () => {
         return () => {
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
         };
-    }, [gameState, isPaused, settings]);
+    }, [gameState, isPaused, settings, levelTransition]);
 
     React.useEffect(() => {
         if (resumeCountdown > 0) {
@@ -1573,7 +1847,7 @@ const GameSandbox: FC = () => {
             <div className="absolute bottom-[-20%] right-[-20%] w-[140%] h-[50%] bg-cyan-900/20 blur-[100px] pointer-events-none" />
 
             {/* Header Scoreboard */}
-            <div className={`relative shrink-0 w-full flex items-center px-3 py-2 bg-slate-900/90 rounded-2xl border border-white/10 backdrop-blur-xl shadow-lg z-10 ${gameMode === 'duel' || gameMode === 'target' ? 'justify-between' : 'justify-center'}`}>
+            <div className={`relative shrink-0 w-full flex items-center px-3 py-2 bg-slate-900/90 rounded-2xl border border-white/10 backdrop-blur-xl shadow-lg z-10 ${gameMode === 'duel' || gameMode === 'target' || gameMode === 'campaign' ? 'justify-between' : 'justify-center'}`}>
                 {gameMode === 'duel' && (
                     <div className="flex flex-col items-start w-1/3">
                         <span className="text-[9px] text-pink-400 font-bold uppercase tracking-wider">CPU</span>
@@ -1584,6 +1858,23 @@ const GameSandbox: FC = () => {
                     <div className="flex flex-col items-start w-1/3">
                         <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider">TIME</span>
                         <span className="text-xl font-black text-white leading-none">{timeLeft}</span>
+                    </div>
+                )}
+                {gameMode === 'campaign' && (
+                    <div className="flex flex-col items-start w-1/3">
+                        <div className="flex gap-3">
+                            <div className="flex flex-col">
+                                <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider">LEVEL</span>
+                                <span className="text-xl font-black text-white leading-none">{state.current.campaignLevel + 1}</span>
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-[9px] text-red-400 font-bold uppercase tracking-wider">LIVES</span>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-xl font-black text-white leading-none">{lives}</span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-red-500 animate-pulse"><path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z" /></svg>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
                 
@@ -1618,6 +1909,30 @@ const GameSandbox: FC = () => {
                 onClick={releaseBalls}
             >
                 <canvas ref={canvasRef} className="block w-full h-full" />
+
+                {levelTransition && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-40 backdrop-blur-sm pointer-events-none">
+                        <div className="flex flex-col items-center animate-in fade-in zoom-in duration-300">
+                            <h2 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 to-purple-600 drop-shadow-[0_0_15px_rgba(168,85,247,0.5)] mb-2">
+                                {levelTransition}
+                            </h2>
+                            <p className="text-white/70 text-sm font-bold tracking-widest uppercase">Get Ready</p>
+                        </div>
+                    </div>
+                )}
+
+                {goalPopup && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+                        <div className="animate-bounce">
+                            <h2 
+                                className="text-7xl font-black italic tracking-tighter drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)]"
+                                style={{ color: goalPopup.color }}
+                            >
+                                {goalPopup.text}
+                            </h2>
+                        </div>
+                    </div>
+                )}
 
                 {/* Pause Button */}
                 {gameState === 'playing' && !isPaused && (
@@ -1750,6 +2065,13 @@ const GameSandbox: FC = () => {
                                         <span className="text-3xl font-black text-rose-400/50 group-hover:text-rose-300 transition-colors">BOSS</span>
                                         <h3 className="text-sm font-bold text-white mt-1">Boss Rush</h3>
                                         <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.bossrush}</span>
+                                    </button>
+
+                                    {/* Campaign Button */}
+                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('campaign'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-purple-400/50 transition-all hover:shadow-[0_0_20px_rgba(192,132,252,0.15)] active:scale-[0.98]">
+                                        <span className="text-3xl font-black text-purple-400/50 group-hover:text-purple-300 transition-colors">SAGA</span>
+                                        <h3 className="text-sm font-bold text-white mt-1">Campaign</h3>
+                                        <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.campaign}</span>
                                     </button>
                                 </div>
                             </>
@@ -1891,21 +2213,32 @@ const GameSandbox: FC = () => {
                 {gameState === 'gameover' && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md z-20 p-6">
                         <div className="text-center mb-8">
-                            <h2 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-rose-400 to-red-600 drop-shadow-lg mb-2">
-                                GAME OVER
-                            </h2>
+                            {winner === 'Champion' ? (
+                                <>
+                                    <h2 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-amber-600 drop-shadow-lg mb-2 animate-bounce">
+                                        VICTORY!
+                                    </h2>
+                                    <p className="text-cyan-400 font-bold tracking-widest text-sm mb-4">CAMPAIGN CLEARED</p>
+                                </>
+                            ) : (
+                                <h2 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-rose-400 to-red-600 drop-shadow-lg mb-2">
+                                    GAME OVER
+                                </h2>
+                            )}
                             <div className="px-6 py-3 bg-white/5 rounded-xl border border-white/10 backdrop-blur-sm">
                                 <p className="text-sm font-medium text-slate-300">
-                                    {gameMode === 'survival' || gameMode === 'target' || gameMode === 'bossrush'
-                                        ? `You destroyed`
-                                        : winner === 'Player' ? 'Victory!' : 'Defeat'}
+                                    {winner === 'Champion' 
+                                        ? 'Final Score'
+                                        : (gameMode === 'survival' || gameMode === 'target' || gameMode === 'bossrush' || gameMode === 'campaign'
+                                            ? `You destroyed`
+                                            : winner === 'Player' ? 'Victory!' : 'Defeat')}
                                 </p>
                                 <p className="text-3xl font-black text-white mt-1">
-                                    {gameMode === 'survival' || gameMode === 'target' || gameMode === 'bossrush'
+                                    {gameMode === 'survival' || gameMode === 'target' || gameMode === 'bossrush' || gameMode === 'campaign'
                                         ? scores.jen
                                         : winner === 'Player' ? 'YOU WON' : 'AI WINS'}
                                 </p>
-                                {(gameMode === 'survival' || gameMode === 'target' || gameMode === 'bossrush') && (
+                                {(gameMode === 'survival' || gameMode === 'target' || gameMode === 'bossrush' || gameMode === 'campaign') && winner !== 'Champion' && (
                                     <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest font-bold">
                                         {gameMode === 'target' ? 'Targets' : (gameMode === 'bossrush' ? 'Score' : 'Bricks')}
                                     </p>
