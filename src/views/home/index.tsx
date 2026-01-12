@@ -110,6 +110,78 @@ const CAMPAIGN_LEVELS = [
     ]
 ];
 
+const CRTEffect = () => (
+    <div className="pointer-events-none absolute inset-0 z-50 h-full w-full">
+        {/* Scanlines and RGB split */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%]" />
+        {/* Vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_50%,rgba(0,0,0,0.4)_100%)]" />
+    </div>
+);
+
+const MenuParticles: FC = () => {
+    const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+    React.useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        let animationFrameId: number;
+        const particles: {x: number, y: number, vx: number, vy: number, size: number, color: string}[] = [];
+
+        const resize = () => {
+            const parent = canvas.parentElement;
+            if (parent) {
+                canvas.width = parent.clientWidth;
+                canvas.height = parent.clientHeight;
+            }
+        };
+        resize();
+
+        const colors = ['#22d3ee', '#c084fc', '#f472b6'];
+
+        for(let i=0; i<30; i++) {
+            particles.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                vx: (Math.random() - 0.5) * 0.5,
+                vy: (Math.random() - 0.5) * 0.5,
+                size: Math.random() * 2 + 1,
+                color: colors[Math.floor(Math.random() * colors.length)]
+            });
+        }
+
+        const render = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+
+                if (p.x < 0) p.x = canvas.width;
+                if (p.x > canvas.width) p.x = 0;
+                if (p.y < 0) p.y = canvas.height;
+                if (p.y > canvas.height) p.y = 0;
+
+                ctx.globalAlpha = 0.4;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            animationFrameId = requestAnimationFrame(render);
+        };
+        render();
+
+        return () => cancelAnimationFrame(animationFrameId);
+    }, []);
+
+    return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />;
+};
+
 const GameSandbox: FC = () => {
     const canvasRef = React.useRef<HTMLCanvasElement>(null);
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -122,7 +194,7 @@ const GameSandbox: FC = () => {
     const [gameMode, setGameMode] = useState<'duel' | 'survival' | 'target' | 'bossrush' | 'campaign' | null>(null);
     const [highScores, setHighScores] = useState({ duel: 0, survival: 0, target: 0, bossrush: 0, campaign: 0 });
     const [menuScreen, setMenuScreen] = useState<'main' | 'settings' | 'howtoplay'>('main');
-    const [settings, setSettings] = useState({ sound: true, vibration: true, difficulty: 'medium', musicVolume: 0.3 });
+    const [settings, setSettings] = useState({ sound: true, music: true, vibration: true, difficulty: 'medium', musicVolume: 0.3 });
     const [isPaused, setIsPaused] = useState(false);
     const [resumeCountdown, setResumeCountdown] = useState(0);
     const [timeLeft, setTimeLeft] = useState(60);
@@ -169,6 +241,10 @@ const GameSandbox: FC = () => {
         campaignLevel: 0,
         lives: 3,
         paddleFlashTimer: 0,
+        textParticles: [] as { x: number, y: number, vy: number, text: string, color: string, life: number }[],
+        stars: [] as { x: number, y: number, size: number, speed: number, opacity: number }[],
+        aiErrorOffset: 0,
+        aiUpdateTimer: 0,
     });
 
     React.useEffect(() => {
@@ -216,11 +292,11 @@ const GameSandbox: FC = () => {
 
         // 2. Attempt to play immediately (handles "play as i launch")
         const tryPlay = () => {
-            if (bgmRef.current && settings.musicVolume > 0) {
+            if (bgmRef.current && settings.music && settings.musicVolume > 0) {
                 bgmRef.current.play().catch(() => {
                     // If blocked, wait for first click to start
                     const onInteract = () => {
-                        if (bgmRef.current && settings.musicVolume > 0) bgmRef.current.play().catch(() => {});
+                        if (bgmRef.current && settings.music && settings.musicVolume > 0) bgmRef.current.play().catch(() => {});
                         window.removeEventListener('click', onInteract);
                     };
                     window.addEventListener('click', onInteract);
@@ -234,14 +310,14 @@ const GameSandbox: FC = () => {
         // 3. Manage Playback & Volume based on state
         if (!bgmRef.current) return;
 
-        if (settings.musicVolume > 0) {
+        if (settings.music && settings.musicVolume > 0) {
             bgmRef.current.play().catch(() => {});
             // Reduce volume when paused (0.1), otherwise normal (0.3)
             bgmRef.current.volume = isPaused ? settings.musicVolume * 0.3 : settings.musicVolume;
         } else {
             bgmRef.current.pause();
         }
-    }, [gameState, isPaused, settings.musicVolume]);
+    }, [gameState, isPaused, settings.musicVolume, settings.music]);
 
     React.useEffect(() => {
         return () => { bgmRef.current?.pause(); };
@@ -277,6 +353,18 @@ const GameSandbox: FC = () => {
             .custom-scrollbar::-webkit-scrollbar-thumb:hover {
                 background: rgba(255, 255, 255, 0.3);
             }
+            @keyframes glitch {
+                0% { transform: translate(0) skew(0deg); }
+                2% { transform: translate(-2px, 1px) skew(-2deg); }
+                4% { transform: translate(2px, -1px) skew(2deg); }
+                6% { transform: translate(0) skew(0deg); }
+                98% { transform: translate(0) skew(0deg); }
+                99% { transform: translate(1px, -1px) skew(1deg); }
+                100% { transform: translate(0) skew(0deg); }
+            }
+            .glitch-text {
+                animation: glitch 3s infinite;
+            }
         `;
         document.head.appendChild(style);
         return () => {
@@ -291,7 +379,7 @@ const GameSandbox: FC = () => {
                 bgmRef.current?.pause();
             } else {
                 // Resume if settings allow and game state expects music
-                if (settings.musicVolume > 0 && (gameState === 'menu' || (gameState === 'playing' && !isPaused))) {
+                if (settings.music && settings.musicVolume > 0 && (gameState === 'menu' || (gameState === 'playing' && !isPaused))) {
                     bgmRef.current?.play().catch(() => {});
                 }
             }
@@ -326,7 +414,7 @@ const GameSandbox: FC = () => {
         // Reset volume to normal for gameplay
         bgmRef.current.volume = settings.musicVolume;
 
-        if (settings.musicVolume > 0) {
+        if (settings.music && settings.musicVolume > 0) {
             bgmRef.current.play().catch((e) => console.error("Start Game Audio Error:", e));
         }
 
@@ -378,6 +466,22 @@ const GameSandbox: FC = () => {
         state.current.lives = 3;
         setLives(3);
         state.current.paddleFlashTimer = 0;
+        state.current.textParticles = [];
+        state.current.aiErrorOffset = 0;
+        state.current.aiUpdateTimer = 0;
+
+        // Initialize stars if empty
+        if (state.current.stars.length === 0) {
+            for (let i = 0; i < 50; i++) {
+                state.current.stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 2 + 0.5,
+                    speed: Math.random() * 0.2 + 0.05,
+                    opacity: Math.random() * 0.5 + 0.1
+                });
+            }
+        }
 
         // Build Wall (Middle 30%)
         const newBricks = [];
@@ -460,8 +564,9 @@ const GameSandbox: FC = () => {
     const startNextLevel = () => {
         const s = state.current;
         s.campaignLevel++;
-        s.lives = Math.min(3, s.lives + 1); // Heal 1 life, max 3
+        s.lives = 3; // Reset to 3 lives
         setLives(s.lives);
+        setScores({ jen: s.scoreP, jason: s.scoreO }); // Sync score immediately
         
         setLevelTransition(`LEVEL ${s.campaignLevel + 1}`);
         setTimeout(() => setLevelTransition(null), 2000);
@@ -480,9 +585,10 @@ const GameSandbox: FC = () => {
         s.powerups = [];
         s.particles = [];
         s.bricksBroken = 0;
+        s.textParticles = [];
 
-        // Difficulty: Shrink paddle by 2% per level (min 10% width)
-        s.paddleP.w = Math.max(0.1, 0.2 - (s.campaignLevel * 0.02));
+        // Difficulty: Keep paddle size constant
+        s.paddleP.w = 0.2;
 
         // Generate bricks for next level
         const levelLayout = CAMPAIGN_LEVELS[s.campaignLevel];
@@ -519,16 +625,16 @@ const GameSandbox: FC = () => {
                 y: h * 0.15,
                 w: 120,
                 h: 60,
-                hp: 80,
-                maxHp: 80,
+                hp: 150,
+                maxHp: 150,
                 vx: 3
             });
         } else if (s.campaignLevel === 4) { // Level 5 (Final)
             s.bosses.push({
-                active: true, x: w * 0.3 - 50, y: h * 0.15, w: 100, h: 50, hp: 100, maxHp: 100, vx: 2
+                active: true, x: w * 0.3 - 50, y: h * 0.15, w: 100, h: 50, hp: 200, maxHp: 200, vx: 2
             });
             s.bosses.push({
-                active: true, x: w * 0.7 - 50, y: h * 0.25, w: 100, h: 50, hp: 100, maxHp: 100, vx: -2
+                active: true, x: w * 0.7 - 50, y: h * 0.25, w: 100, h: 50, hp: 200, maxHp: 200, vx: -2
             });
         }
         
@@ -743,6 +849,7 @@ const GameSandbox: FC = () => {
                 setHighScores(saved);
             }
         }
+        setScores({ jen: s.scoreP, jason: s.scoreO }); // Sync score immediately
         setGameState('gameover');
         setWinner(winnerText);
         vibrate([100, 50, 100]);
@@ -750,6 +857,7 @@ const GameSandbox: FC = () => {
 
     const update = () => {
         const s = state.current;
+        if (s.width === 0 || s.height === 0) return;
         const w = s.width;
         const h = s.height;
         const pY = h * (1 - 0.05);
@@ -870,10 +978,16 @@ const GameSandbox: FC = () => {
                 const isRage = boss.hp < boss.maxHp * 0.4;
                 if (isRage) anyRage = true;
 
+                // Slower projectiles in campaign mode
+                let speed = isRage ? 8 : 5;
+                if (s.gameMode === 'campaign') {
+                    speed = isRage ? 5 : 3;
+                }
+
                 s.bossProjectiles.push({
                     x: boss.x + boss.w / 2 - (isRage ? 5 : 4),
                     y: boss.y + boss.h,
-                    vy: isRage ? 8 : 5,
+                    vy: speed,
                     w: isRage ? 10 : 8,
                     h: isRage ? 20 : 16
                 });
@@ -899,18 +1013,13 @@ const GameSandbox: FC = () => {
                 vibrate([50, 30, 50]);
 
                 // Damage Logic
-                if (s.gameMode === 'campaign') {
-                    if (s.lives > 1) {
-                        s.lives--;
-                        setLives(s.lives);
-                        s.paddleFlashTimer = 20;
-                    } else {
-                        handleGameOver('Defeated');
-                        return;
-                    }
-                } else if (s.gameMode === 'bossrush' || s.gameMode === 'survival') {
-                    handleGameOver('Defeated');
-                    return;
+                if (s.gameMode === 'campaign' || s.gameMode === 'bossrush' || s.gameMode === 'survival') {
+                    const penalty = 500;
+                    const deduction = Math.min(s.scoreP, penalty);
+                    s.scoreP -= deduction;
+                    addScore(-deduction);
+                    s.paddleFlashTimer = 20;
+                    s.textParticles.push({ x: p.x, y: p.y, vy: -1, text: `-${deduction}`, color: '#ef4444', life: 1.0 });
                 }
                 continue;
             }
@@ -952,6 +1061,10 @@ const GameSandbox: FC = () => {
                     
                         boss.hp--;
                     
+                        // Add score on boss hit
+                        s.scoreP += 10;
+                        addScore(10);
+
                         const ratio = Math.max(0, boss.hp / boss.maxHp);
                         const r = Math.floor(239 + (168 - 239) * ratio);
                         const g = Math.floor(68 + (85 - 68) * ratio);
@@ -985,7 +1098,6 @@ const GameSandbox: FC = () => {
                             if (s.gameMode === 'bossrush') {
                             s.scoreP += 500 * s.bossLevel;
                             addScore(500 * s.bossLevel);
-                            setScores({ jen: s.scoreP, jason: s.scoreO });
                             s.bossLevel++;
                             
                             // Spawn next boss
@@ -1099,10 +1211,12 @@ const GameSandbox: FC = () => {
                             s.scoreO++;
                             triggerAiTaunt();
                             playAiScoreSound();
+                            s.textParticles.push({ x: b.x + b.w/2, y: b.y, vy: -1, text: '+1', color: '#f472b6', life: 1.0 });
                         } else {
                             s.scoreP++;
                             addScore(1);
                             playBrickSound();
+                            s.textParticles.push({ x: b.x + b.w/2, y: b.y, vy: -1, text: '+1', color: '#38bdf8', life: 1.0 });
                         }
                     } else { // survival or target
                         const points = (s.gameMode === 'target' && b.isGolden) ? 5 : 1;
@@ -1147,12 +1261,19 @@ const GameSandbox: FC = () => {
                                 }
                                 s.bricksBroken++;
                                 if (ball.lastHitBy === 'ai') {
-                                    if (s.gameMode === 'duel') { s.scoreO++; playAiScoreSound(); }
+                                    if (s.gameMode === 'duel') { 
+                                        s.scoreO++; 
+                                        playAiScoreSound();
+                                        s.textParticles.push({ x: other.x + other.w/2, y: other.y, vy: -1, text: '+1', color: '#f472b6', life: 1.0 });
+                                    }
                                     else playBrickSound();
                                 } else {
                                     s.scoreP++;
                                     addScore(1);
                                     playBrickSound();
+                                    if (s.gameMode === 'duel') {
+                                        s.textParticles.push({ x: other.x + other.w/2, y: other.y, vy: -1, text: '+1', color: '#38bdf8', life: 1.0 });
+                                    }
                                 }
                             }
                         }
@@ -1205,7 +1326,7 @@ const GameSandbox: FC = () => {
                     lastBallOutDir = 1;
 
                     if (s.gameMode === 'duel') {
-                        s.scoreO += 10;
+                        s.scoreO += 1;
                         triggerAiTaunt();
                         playAiScoreSound();
                         setGoalPopup({ text: 'GOAL!', color: '#f472b6' });
@@ -1216,8 +1337,8 @@ const GameSandbox: FC = () => {
                 s.balls.splice(i, 1);
                 lastBallOutDir = -1;
                 if (s.gameMode === 'duel') {
-                    s.scoreP += 10;
-                    addScore(10);
+                    s.scoreP += 1;
+                    addScore(1);
                     playBrickSound();
                     setGoalPopup({ text: 'GOAL!', color: '#38bdf8' });
                     setTimeout(() => setGoalPopup(null), 1000);
@@ -1286,10 +1407,12 @@ const GameSandbox: FC = () => {
                         s.scoreO++;
                         triggerAiTaunt();
                         playAiScoreSound();
+                        s.textParticles.push({ x: b.x + b.w/2, y: b.y, vy: -1, text: '+1', color: '#f472b6', life: 1.0 });
                     } else { // Player Laser (or survival)
                         s.scoreP++;
                         addScore(1);
                         playBrickSound();
+                        if (s.gameMode === 'duel') s.textParticles.push({ x: b.x + b.w/2, y: b.y, vy: -1, text: '+1', color: '#38bdf8', life: 1.0 });
                     }
 
                     if (Math.random() < 0.1) {
@@ -1310,6 +1433,14 @@ const GameSandbox: FC = () => {
 
         // 6. AI Movement (Predictive tracking)
         if (s.gameMode === 'duel') {
+            // Update AI error occasionally to simulate imperfection
+            s.aiUpdateTimer--;
+            if (s.aiUpdateTimer <= 0) {
+                s.aiUpdateTimer = Math.random() * 60 + 30; // Update every 0.5-1.5 seconds
+                const errorMag = settings.difficulty === 'hard' ? 0.02 : (settings.difficulty === 'easy' ? 0.1 : 0.05);
+                s.aiErrorOffset = (Math.random() - 0.5) * errorMag;
+            }
+
             let targetX = s.paddleO.x;
             const balls = s.balls;
             const powerups = s.powerups;
@@ -1355,6 +1486,9 @@ const GameSandbox: FC = () => {
                 }
             }
 
+            // Apply human-like error
+            targetX += s.aiErrorOffset;
+
             // Dynamic reaction speed
             const dist = Math.abs(targetX - s.paddleO.x);
             
@@ -1363,10 +1497,27 @@ const GameSandbox: FC = () => {
             else if (settings.difficulty === 'hard') baseLerp = 0.18;
             const lerpFactor = dist > 0.2 ? baseLerp * 1.5 : baseLerp;
 
-            s.paddleO.x += (targetX - s.paddleO.x) * lerpFactor;
+            // Calculate movement with speed cap (so AI can't teleport)
+            let move = (targetX - s.paddleO.x) * lerpFactor;
+            const maxSpeed = settings.difficulty === 'hard' ? 0.045 : (settings.difficulty === 'easy' ? 0.015 : 0.025);
+            
+            if (Math.abs(move) > maxSpeed) {
+                move = maxSpeed * Math.sign(move);
+            }
+
+            s.paddleO.x += move;
             // Clamp AI
             const effectiveOW = s.activePowerup === 'wide' ? s.paddleO.w * 1.5 : s.paddleO.w;
             s.paddleO.x = Math.max(effectiveOW/2, Math.min(1 - effectiveOW/2, s.paddleO.x));
+        }
+
+        // 6.5 Update Stars
+        for (let star of s.stars) {
+            star.y += star.speed;
+            if (star.y > h) {
+                star.y = 0;
+                star.x = Math.random() * w;
+            }
         }
 
         // 7. Particles
@@ -1376,6 +1527,13 @@ const GameSandbox: FC = () => {
             p.life -= 0.05;
         }
         s.particles = s.particles.filter(p => p.life > 0);
+
+        // 7.5 Text Particles
+        for (let p of s.textParticles) {
+            p.y += p.vy;
+            p.life -= 0.02;
+        }
+        s.textParticles = s.textParticles.filter(p => p.life > 0);
 
         // 8. Powerups
         const effectivePW = s.activePowerup === 'wide' ? s.paddleP.w * 1.5 : s.paddleP.w;
@@ -1390,14 +1548,26 @@ const GameSandbox: FC = () => {
                 s.paddleFlashTimer = 45;
                 if (p.type === 'shield') {
                     s.shieldActive = true;
-                }
-                else if (p.type === 'multiball') {
-                    const newBalls: typeof s.balls = [];
-                    s.balls?.forEach(b => {
-                        newBalls.push({ ...b, vx: b.vx - 2, vy: b.vy });
-                        newBalls.push({ ...b, vx: b.vx + 2, vy: b.vy });
-                    });
-                    s.balls.push(...newBalls);
+                    } else if (p.type === 'multiball') {
+                        if (s.balls.length < 50) { // Cap balls to prevent crash
+                            const newBalls: typeof s.balls = [];
+                            if (s.balls.length >= 10) {
+                                // If many balls, just add 2 based on the first one
+                                const b = s.balls[0];
+                                if (b && s.balls.length + 2 <= 50) {
+                                    newBalls.push({ ...b, vx: b.vx - 2, vy: b.vy });
+                                    newBalls.push({ ...b, vx: b.vx + 2, vy: b.vy });
+                                }
+                            } else {
+                                s.balls?.forEach(b => {
+                                    if (s.balls.length + newBalls.length < 50) {
+                                        newBalls.push({ ...b, vx: b.vx - 2, vy: b.vy });
+                                        newBalls.push({ ...b, vx: b.vx + 2, vy: b.vy });
+                                    }
+                                });
+                            }
+                            s.balls.push(...newBalls);
+                        }
                 } else if (p.type === 'health') {
                     s.lives = Math.min(3, s.lives + 1);
                     setLives(s.lives);
@@ -1418,12 +1588,27 @@ const GameSandbox: FC = () => {
                     if (p.type === 'shield') {
                         // AI consumes shield (denies player)
                     } else if (p.type === 'multiball') {
-                        const newBalls: typeof s.balls = [];
-                        s.balls?.forEach(b => {
-                            newBalls.push({ ...b, vx: b.vx - 2, vy: b.vy });
-                            newBalls.push({ ...b, vx: b.vx + 2, vy: b.vy });
-                        });
-                        s.balls.push(...newBalls);
+                        if (s.balls.length < 50) {
+                            const newBalls: typeof s.balls = [];
+                            if (s.balls.length >= 10) {
+                                // If many balls, just add 2 based on the first one
+                                const b = s.balls[0];
+                                if (b && s.balls.length + 2 <= 50) {
+                                    newBalls.push({ ...b, vx: b.vx - 2, vy: b.vy });
+                                    newBalls.push({ ...b, vx: b.vx + 2, vy: b.vy });
+                                }
+                            } else {
+                                s.balls?.forEach(b => {
+                                    if (s.balls.length + newBalls.length < 50) {
+                                        newBalls.push({ ...b, vx: b.vx - 2, vy: b.vy });
+                                        newBalls.push({ ...b, vx: b.vx + 2, vy: b.vy });
+                                    }
+                                });
+                            }
+                            s.balls.push(...newBalls);
+                        }
+                    } else if (p.type === 'health') {
+                        // AI consumes health
                     } else {
                         s.activePowerup = p.type;
                         s.powerupTimer = 600;
@@ -1434,6 +1619,9 @@ const GameSandbox: FC = () => {
             if (p.y > h) p.active = false;
         }
         s.powerups = s.powerups.filter(p => p.active);
+
+        // Clean up dead bosses to prevent array bloat
+        s.bosses = s.bosses.filter(b => b.active);
 
         if (s.powerupTimer > 0) {
             s.powerupTimer--;
@@ -1498,6 +1686,11 @@ const GameSandbox: FC = () => {
             }
         }
 
+        // Update Multiplier UI if changed
+        if (s.multiplier !== initialMultiplier) {
+            setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1)));
+        }
+
         // Update UI if scores changed
         if (s.scoreP !== prevScoreP || s.scoreO !== prevScoreO) {
             setScores({ jen: s.scoreP, jason: s.scoreO });
@@ -1535,12 +1728,6 @@ const GameSandbox: FC = () => {
             lastHitBy: playerLost ? 'ai' : 'player',
         }];
         s.multiplier = 1.0;
-        // Difficulty: Increase speed by 15% per level in Campaign
-        if (s.gameMode === 'campaign') {
-            s.multiplier = 1.0 + (s.campaignLevel * 0.15);
-        } else {
-            s.multiplier = 1.0;
-        }
 
         setDisplayMultiplier(parseFloat(s.multiplier.toFixed(1)));
         s.activePowerup = null;
@@ -1574,9 +1761,15 @@ const GameSandbox: FC = () => {
 
         if (!bgDrawn) {
             ctx.clearRect(0, 0, s.width, s.height);
+
+            // Draw Stars
+            s.stars.forEach(star => {
+                ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
+                ctx.fillRect(star.x, star.y, star.size, star.size);
+            });
             
             // Dynamic background tint based on music volume
-            if (settings.musicVolume > 0) {
+            if (settings.music && settings.musicVolume > 0) {
                 const hue = 220 + (settings.musicVolume * 120); // Blue (220) -> Pink/Rose (340)
                 const alpha = settings.musicVolume * 0.2; // More opaque at higher volumes
                 ctx.fillStyle = `hsla(${hue}, 70%, 50%, ${alpha})`;
@@ -1782,6 +1975,16 @@ const GameSandbox: FC = () => {
         });
         ctx.globalAlpha = 1.0;
 
+        // Draw Text Particles
+        s.textParticles?.forEach(p => {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(p.text, p.x, p.y);
+        });
+        ctx.globalAlpha = 1.0;
+
         ctx.restore();
     };
 
@@ -1835,6 +2038,7 @@ const GameSandbox: FC = () => {
 
     return (
         <div className="w-full h-full flex flex-col relative overflow-hidden">
+            <CRTEffect />
             {/* Audio Debug Error Message */}
             {audioError && (
                 <div className="absolute top-0 left-0 w-full bg-red-600 text-white text-[10px] font-bold p-1 text-center z-50 animate-pulse">
@@ -1913,7 +2117,7 @@ const GameSandbox: FC = () => {
                 {levelTransition && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-40 backdrop-blur-sm pointer-events-none">
                         <div className="flex flex-col items-center animate-in fade-in zoom-in duration-300">
-                            <h2 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 to-purple-600 drop-shadow-[0_0_15px_rgba(168,85,247,0.5)] mb-2">
+                            <h2 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 to-purple-600 drop-shadow-[0_0_15px_rgba(168,85,247,0.5)] mb-2 text-center">
                                 {levelTransition}
                             </h2>
                             <p className="text-white/70 text-sm font-bold tracking-widest uppercase">Get Ready</p>
@@ -1925,7 +2129,7 @@ const GameSandbox: FC = () => {
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
                         <div className="animate-bounce">
                             <h2 
-                                className="text-7xl font-black italic tracking-tighter drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)]"
+                                className="text-6xl font-black italic tracking-tighter drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)] text-center"
                                 style={{ color: goalPopup.color }}
                             >
                                 {goalPopup.text}
@@ -1937,6 +2141,21 @@ const GameSandbox: FC = () => {
                 {/* Pause Button */}
                 {gameState === 'playing' && !isPaused && (
                     <>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); updateSettings('music', !settings.music); }}
+                            className="absolute top-3 right-24 p-2 text-white/50 hover:text-white bg-black/20 hover:bg-black/40 rounded-full backdrop-blur-sm transition-all z-10"
+                        >
+                            {settings.music ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
+                                </svg>
+                            )}
+                        </button>
                         <button 
                             onClick={(e) => { e.stopPropagation(); updateSettings('sound', !settings.sound); }}
                             className="absolute top-3 right-14 p-2 text-white/50 hover:text-white bg-black/20 hover:bg-black/40 rounded-full backdrop-blur-sm transition-all z-10"
@@ -2004,80 +2223,109 @@ const GameSandbox: FC = () => {
 
                 {/* Start / Menu Overlay */}
                 {gameState === 'menu' && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md z-20 p-6 transition-opacity duration-300">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md z-20 transition-opacity duration-300">
                         {menuScreen === 'main' && (
-                            <>
+                            <div className="w-full h-full relative flex flex-col">
+                                {/* Background effects */}
                                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent pointer-events-none" />
                                 
-                                <button 
-                                    onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('howtoplay'), 200); }}
-                                    onMouseEnter={playHoverSound}
-                                    className="absolute top-4 left-4 p-2 text-slate-500 hover:text-white transition-colors hover:bg-white/10 rounded-full z-30 overflow-hidden"
-                                    title="How to Play"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                </button>
-
-                                <button 
-                                    onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('settings'), 200); }}
-                                    onMouseEnter={playHoverSound}
-                                    className="absolute top-4 right-4 p-2 text-slate-500 hover:text-white transition-colors hover:bg-white/10 rounded-full z-30 overflow-hidden"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
-                                </button>
-
-                                <h2 className="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 via-white to-pink-400 mb-4 drop-shadow-sm text-center mt-4">
-                                    ARCADE<br/>ARENA
-                                </h2>
-                                <div className="mb-6 px-4 py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-2">
-                                    <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Lifetime Score</span>
-                                    <span className="text-lg font-black text-cyan-400 font-mono">{displayedTotalScore.toLocaleString()}</span>
-                                </div>
-                                <div className="w-full grid grid-cols-2 gap-3 max-w-xs">
-                                    {/* Duel Button */}
-                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('duel'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-cyan-400/50 transition-all hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] active:scale-[0.98]">
-                                        <span className="text-3xl font-black text-cyan-400/50 group-hover:text-cyan-300 transition-colors">VS</span>
-                                        <h3 className="text-sm font-bold text-white mt-1">Demolition Duel</h3>
-                                        <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.duel}</span>
+                                {/* Top Bar */}
+                                <div className="w-full flex justify-between items-center p-4 z-30">
+                                    <button 
+                                        onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('howtoplay'), 200); }}
+                                        onMouseEnter={playHoverSound}
+                                        className="p-2 text-slate-400 hover:text-white transition-colors hover:bg-white/10 rounded-full"
+                                        title="How to Play"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
                                     </button>
-
-                                    {/* Survival Button */}
-                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('survival'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-amber-400/50 transition-all hover:shadow-[0_0_20px_rgba(251,191,36,0.15)] active:scale-[0.98]">
-                                        <span className="text-3xl font-black text-amber-400/50 group-hover:text-amber-300 transition-colors">SOLO</span>
-                                        <h3 className="text-sm font-bold text-white mt-1">Brickfall Survival</h3>
-                                        <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.survival}</span>
-                                    </button>
-
-                                    {/* Target Button */}
-                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('target'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-emerald-400/50 transition-all hover:shadow-[0_0_20px_rgba(52,211,153,0.15)] active:scale-[0.98]">
-                                        <span className="text-3xl font-black text-emerald-400/50 group-hover:text-emerald-300 transition-colors">AIM</span>
-                                        <h3 className="text-sm font-bold text-white mt-1">Target Practice</h3>
-                                        <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.target}</span>
-                                    </button>
-
-                                    {/* Boss Rush Button */}
-                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('bossrush'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-rose-400/50 transition-all hover:shadow-[0_0_20px_rgba(244,63,94,0.15)] active:scale-[0.98]">
-                                        <span className="text-3xl font-black text-rose-400/50 group-hover:text-rose-300 transition-colors">BOSS</span>
-                                        <h3 className="text-sm font-bold text-white mt-1">Boss Rush</h3>
-                                        <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.bossrush}</span>
-                                    </button>
-
-                                    {/* Campaign Button */}
-                                    <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('campaign'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden aspect-square flex flex-col items-center justify-center text-center p-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/10 hover:border-purple-400/50 transition-all hover:shadow-[0_0_20px_rgba(192,132,252,0.15)] active:scale-[0.98]">
-                                        <span className="text-3xl font-black text-purple-400/50 group-hover:text-purple-300 transition-colors">SAGA</span>
-                                        <h3 className="text-sm font-bold text-white mt-1">Campaign</h3>
-                                        <span className="absolute bottom-2 text-[10px] text-slate-500 font-mono">HI: {highScores.campaign}</span>
+                                    <button 
+                                        onClick={(e) => { createRipple(e); setTimeout(() => setMenuScreen('settings'), 200); }}
+                                        onMouseEnter={playHoverSound}
+                                        className="p-2 text-slate-400 hover:text-white transition-colors hover:bg-white/10 rounded-full"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        </svg>
                                     </button>
                                 </div>
-                            </>
+
+                                {/* Title Section */}
+                                <div className="relative flex flex-col items-center justify-center shrink-0 mb-6 py-6 w-full overflow-hidden">
+                                    <MenuParticles />
+                                    <h2 className="relative z-10 text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-cyan-400 via-white to-purple-400 drop-shadow-[0_0_15px_rgba(168,85,247,0.5)] text-center leading-none glitch-text">
+                                        ARCADE<br/>ARENA
+                                    </h2>
+                                    <div className="relative z-10 mt-3 px-4 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-2">
+                                        <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Total Score</span>
+                                        <span className="text-sm font-black text-cyan-400 font-mono">{displayedTotalScore.toLocaleString()}</span>
+                                    </div>
+                                </div>
+
+                                {/* Scrollable Modes List */}
+                                <div className="flex-1 overflow-y-auto px-6 pb-8 custom-scrollbar w-full">
+                                    <div className="flex flex-col gap-3 w-full max-w-xs mx-auto">
+                                        {/* Campaign (Featured) */}
+                                        <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('campaign'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden w-full p-4 bg-gradient-to-r from-purple-900/80 to-indigo-900/80 rounded-2xl border border-white/10 hover:border-purple-400/50 transition-all hover:shadow-[0_0_20px_rgba(168,85,247,0.3)] active:scale-[0.98] text-left">
+                                            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                                                <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                            </div>
+                                            <span className="text-xs font-bold text-purple-300 uppercase tracking-wider mb-1 block">Story Mode</span>
+                                            <h3 className="text-2xl font-black text-white italic">CAMPAIGN</h3>
+                                            <p className="text-[10px] text-purple-200/70 mt-1">Beat levels & bosses to win.</p>
+                                            <span className="absolute bottom-4 right-4 text-[10px] text-white/50 font-mono">HI: {highScores.campaign}</span>
+                                        </button>
+
+                                        {/* Duel */}
+                                        <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('duel'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden w-full p-3 bg-slate-800/50 rounded-xl border border-white/10 hover:bg-slate-800 hover:border-cyan-400/50 transition-all active:scale-[0.98] flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-black text-lg">VS</div>
+                                            <div className="flex-1 text-left">
+                                                <h3 className="text-sm font-bold text-white">Demolition Duel</h3>
+                                                <p className="text-[10px] text-slate-400">Battle against AI</p>
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 font-mono">HI: {highScores.duel}</span>
+                                        </button>
+
+                                        {/* Survival */}
+                                        <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('survival'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden w-full p-3 bg-slate-800/50 rounded-xl border border-white/10 hover:bg-slate-800 hover:border-amber-400/50 transition-all active:scale-[0.98] flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400 font-black text-lg">∞</div>
+                                            <div className="flex-1 text-left">
+                                                <h3 className="text-sm font-bold text-white">Survival</h3>
+                                                <p className="text-[10px] text-slate-400">Don't let bricks fall</p>
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 font-mono">HI: {highScores.survival}</span>
+                                        </button>
+
+                                        {/* Target */}
+                                        <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('target'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden w-full p-3 bg-slate-800/50 rounded-xl border border-white/10 hover:bg-slate-800 hover:border-emerald-400/50 transition-all active:scale-[0.98] flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 font-black text-lg">
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                                            </div>
+                                            <div className="flex-1 text-left">
+                                                <h3 className="text-sm font-bold text-white">Target Practice</h3>
+                                                <p className="text-[10px] text-slate-400">Race against time</p>
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 font-mono">HI: {highScores.target}</span>
+                                        </button>
+
+                                        {/* Boss Rush */}
+                                        <button onClick={(e) => { createRipple(e); setTimeout(() => initGame('bossrush'), 200); }} onMouseEnter={playHoverSound} className="group relative overflow-hidden w-full p-3 bg-slate-800/50 rounded-xl border border-white/10 hover:bg-slate-800 hover:border-rose-400/50 transition-all active:scale-[0.98] flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-lg bg-rose-500/20 flex items-center justify-center text-rose-400 font-black text-lg">☠</div>
+                                            <div className="flex-1 text-left">
+                                                <h3 className="text-sm font-bold text-white">Boss Rush</h3>
+                                                <p className="text-[10px] text-slate-400">Endless bosses</p>
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 font-mono">HI: {highScores.bossrush}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         )}
                         {menuScreen === 'howtoplay' && (
-                            <div className="w-full h-full flex flex-col items-center relative">
+                            <div className="w-full h-full flex flex-col items-center relative p-6">
                                 <h2 className="text-2xl font-black text-white mb-4 mt-2 shrink-0">HOW TO PLAY</h2>
                                 
                                 <div className="w-full max-w-xs space-y-3 text-sm text-slate-300 overflow-y-auto pb-20 px-1 custom-scrollbar">
@@ -2141,6 +2389,7 @@ const GameSandbox: FC = () => {
                                         </div>
                                         
                                         <ToggleSwitch label="Sound Effects" enabled={settings.sound} onChange={() => updateSettings('sound', !settings.sound)} />
+                                        <ToggleSwitch label="Music" enabled={settings.music} onChange={() => updateSettings('music', !settings.music)} />
                                         
                                         <div className="flex flex-col gap-2 p-3 bg-white/5 rounded-xl border border-white/5 backdrop-blur-md transition-all hover:bg-white/10 group">
                                             <div className="flex justify-between items-center">
