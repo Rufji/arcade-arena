@@ -1,3 +1,4 @@
+"use client";
 // Next, React
 import React from 'react';
 import { FC, useState} from 'react';
@@ -173,6 +174,7 @@ const MenuParticles: FC = () => {
             });
             
             animationFrameId = requestAnimationFrame(render);
+            // eslint-disable-next-line react-hooks/exhaustive-deps
         };
         render();
 
@@ -245,6 +247,7 @@ const GameSandbox: FC = () => {
         stars: [] as { x: number, y: number, size: number, speed: number, opacity: number }[],
         aiErrorOffset: 0,
         aiUpdateTimer: 0,
+        shieldRegenTimer: 0,
     });
 
     React.useEffect(() => {
@@ -279,6 +282,7 @@ const GameSandbox: FC = () => {
             };
             animationFrameId = requestAnimationFrame(step);
             return () => cancelAnimationFrame(animationFrameId);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         }
     }, [gameState, menuScreen, totalScore]);
 
@@ -304,6 +308,7 @@ const GameSandbox: FC = () => {
             }
         };
         tryPlay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     React.useEffect(() => {
@@ -386,6 +391,7 @@ const GameSandbox: FC = () => {
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [gameState, isPaused, settings.musicVolume]);
 
     const createRipple = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -469,6 +475,7 @@ const GameSandbox: FC = () => {
         state.current.textParticles = [];
         state.current.aiErrorOffset = 0;
         state.current.aiUpdateTimer = 0;
+        state.current.shieldRegenTimer = 0;
 
         // Initialize stars if empty
         if (state.current.stars.length === 0) {
@@ -694,6 +701,7 @@ const GameSandbox: FC = () => {
     // Helper to initialize audio context once
     const ensureAudioContext = () => {
         const s = state.current;
+        if (typeof window === 'undefined') return null;
         if (!s.audioCtx) {
             const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
             if (AudioContext) s.audioCtx = new AudioContext();
@@ -819,7 +827,7 @@ const GameSandbox: FC = () => {
     };
 
     const vibrate = (pattern: number | number[]) => {
-        if (settings.vibration && navigator.vibrate) {
+        if (settings.vibration && typeof navigator !== 'undefined' && navigator.vibrate) {
             navigator.vibrate(pattern);
         }
     };
@@ -1005,16 +1013,30 @@ const GameSandbox: FC = () => {
             p.y += p.vy;
             
             // Collision with Player
-            if (p.y + p.h >= pY && p.y <= pY + 15 && p.x + p.w >= pX_proj && p.x <= pX_proj + pW_proj) {
+            if (p.vy > 0 && p.y + p.h >= pY && p.y <= pY + 15 && p.x + p.w >= pX_proj && p.x <= pX_proj + pW_proj) {
+                if (s.shieldActive) {
+                    s.shieldActive = false;
+                    s.shieldRegenTimer = 600; // 10s regen
+                    s.shake = 10;
+                    vibrate(50);
+                    s.textParticles.push({ x: p.x, y: p.y, vy: -1, text: 'REFLECTED', color: '#3b82f6', life: 1.0 });
+                    p.vy = -Math.abs(p.vy) * 1.5; // Reflect
+                    continue;
+                }
+
+                s.bossProjectiles.splice(i, 1);
+
+                // Reset regen on hit
+                if (s.shieldRegenTimer > 0) s.shieldRegenTimer = 600;
+
                 s.shake = 20;
                 s.multiplier = 1.0; // Handled at end of frame
                 setDisplayMultiplier(1.0);
-                s.bossProjectiles.splice(i, 1);
                 vibrate([50, 30, 50]);
 
                 // Damage Logic
                 if (s.gameMode === 'campaign' || s.gameMode === 'bossrush' || s.gameMode === 'survival') {
-                    const penalty = 500;
+                    const penalty = 5;
                     const deduction = Math.min(s.scoreP, penalty);
                     s.scoreP -= deduction;
                     addScore(-deduction);
@@ -1023,8 +1045,53 @@ const GameSandbox: FC = () => {
                 }
                 continue;
             }
+
+            // Collision with Boss (Reflected)
+            if (p.vy < 0) {
+                let hitBoss = false;
+                for (const boss of s.bosses) {
+                    if (boss.active && 
+                        p.x + p.w > boss.x && p.x < boss.x + boss.w &&
+                        p.y + p.h > boss.y && p.y < boss.y + boss.h) {
+                        
+                        boss.hp -= 10;
+                        s.textParticles.push({ x: p.x, y: p.y, vy: -1, text: '10', color: '#facc15', life: 1.0 });
+                        s.scoreP += 50;
+                        addScore(50);
+                        hitBoss = true;
+                        
+                        if (boss.hp <= 0) {
+                            boss.active = false;
+                            s.shake = 20;
+                            if (s.gameMode === 'bossrush') {
+                                s.scoreP += 500 * s.bossLevel;
+                                addScore(500 * s.bossLevel);
+                                s.bossLevel++;
+                                s.bosses.push({
+                                    active: true,
+                                    x: w / 2 - 60,
+                                    y: h * 0.15,
+                                    w: 120,
+                                    h: 60,
+                                    hp: 50 + (s.bossLevel * 40),
+                                    maxHp: 50 + (s.bossLevel * 40),
+                                    vx: 3 + (s.bossLevel * 0.5)
+                                });
+                                s.powerups.push({ x: boss.x + boss.w/2, y: boss.y + boss.h/2, vy: 2, type: 'multiball', active: true });
+                            } else {
+                                s.powerups.push({ x: boss.x + boss.w/2, y: boss.y + boss.h/2, vy: 2, type: 'multiball', active: true });
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (hitBoss) {
+                    s.bossProjectiles.splice(i, 1);
+                    continue;
+                }
+            }
             
-            if (p.y > h) s.bossProjectiles.splice(i, 1);
+            if (p.y > h || p.y < -50) s.bossProjectiles.splice(i, 1);
         }
 
         // Iterate backwards to safely remove balls
@@ -1080,7 +1147,7 @@ const GameSandbox: FC = () => {
                         else ball.vy *= -1;
 
                         // Boss Rush: Chance to drop powerup on hit (since there are no bricks)
-                        if (s.gameMode === 'bossrush' && Math.random() < 0.08) {
+                        if (s.gameMode === 'bossrush' && Math.random() < 0.008 && s.powerups.length < 2) {
                             const types = ['wide', 'fire', 'multiball', 'laser', 'sticky', 'bomb', 'shield', 'blackhole', 'health'] as const;
                             s.powerups.push({
                                 x: boss.x + boss.w/2,
@@ -1314,6 +1381,7 @@ const GameSandbox: FC = () => {
             if (ball.y > h + 20) {
                 if (s.shieldActive) {
                     s.shieldActive = false;
+                    s.shieldRegenTimer = 600; // 10s regen
                     ball.y = pY - ball.radius;
                     ball.vy *= -1;
                     s.shake = 10;
@@ -1511,6 +1579,16 @@ const GameSandbox: FC = () => {
             s.paddleO.x = Math.max(effectiveOW/2, Math.min(1 - effectiveOW/2, s.paddleO.x));
         }
 
+        // 6.2 Shield Regen
+        if (s.shieldRegenTimer > 0 && !s.shieldActive) {
+            s.shieldRegenTimer--;
+            if (s.shieldRegenTimer <= 0) {
+                s.shieldActive = true;
+                s.textParticles.push({ x: w/2, y: h/2, vy: -1, text: 'SHIELD RESTORED', color: '#3b82f6', life: 1.5 });
+                playGoldenSound();
+            }
+        }
+
         // 6.5 Update Stars
         for (let star of s.stars) {
             star.y += star.speed;
@@ -1548,6 +1626,7 @@ const GameSandbox: FC = () => {
                 s.paddleFlashTimer = 45;
                 if (p.type === 'shield') {
                     s.shieldActive = true;
+                    s.shieldRegenTimer = 0;
                     } else if (p.type === 'multiball') {
                         if (s.balls.length < 50) { // Cap balls to prevent crash
                             const newBalls: typeof s.balls = [];
@@ -1734,6 +1813,7 @@ const GameSandbox: FC = () => {
         s.powerupTimer = 0;
         s.powerups = [];
         s.shieldActive = false;
+        s.shieldRegenTimer = 0;
         s.lasers = [];
     };
 
@@ -2007,6 +2087,7 @@ const GameSandbox: FC = () => {
         return () => {
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [gameState, isPaused, settings, levelTransition]);
 
     React.useEffect(() => {
@@ -2024,6 +2105,41 @@ const GameSandbox: FC = () => {
             return () => clearTimeout(timer);
         }
     }, [resumeCountdown]);
+
+    // Touch Handling (Relative Movement)
+    const touchRef = React.useRef({ startX: 0, paddleStartX: 0, dragging: false });
+
+    const onTouchStart = (e: React.TouchEvent) => {
+        if (isPaused) return;
+        const touch = e.touches[0];
+        touchRef.current.startX = touch.clientX;
+        touchRef.current.paddleStartX = state.current.paddleP.x;
+        touchRef.current.dragging = false;
+    };
+
+    const onTouchMove = (e: React.TouchEvent) => {
+        if (isPaused || !containerRef.current) return;
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - touchRef.current.startX;
+        const rect = containerRef.current.getBoundingClientRect();
+        
+        // Threshold to consider it a drag (prevent accidental moves on tap)
+        if (Math.abs(deltaX) > 5) touchRef.current.dragging = true;
+
+        if (touchRef.current.dragging) {
+            const deltaNormalized = deltaX / rect.width;
+            const halfW = state.current.paddleP.w / 2;
+            // Relative movement: new position = initial paddle position + delta
+            state.current.paddleP.x = Math.max(halfW, Math.min(1 - halfW, touchRef.current.paddleStartX + deltaNormalized));
+        }
+    };
+
+    const onTouchEnd = () => {
+        if (!touchRef.current.dragging) {
+            releaseBalls();
+        }
+        touchRef.current.dragging = false;
+    };
 
     // Input Handling
     const handleInput = (clientX: number) => {
@@ -2108,8 +2224,9 @@ const GameSandbox: FC = () => {
                 ref={containerRef}
                 className="relative flex-1 w-full mt-2 mb-2 rounded-2xl overflow-hidden border border-white/10 bg-slate-950/80 shadow-2xl touch-none ring-1 ring-white/5"
                 onMouseMove={(e) => handleInput(e.clientX)}
-                onTouchMove={(e) => handleInput(e.touches[0].clientX)}
-                onTouchStart={(e) => handleInput(e.touches[0].clientX)}
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
                 onClick={releaseBalls}
             >
                 <canvas ref={canvasRef} className="block w-full h-full" />
@@ -2275,7 +2392,7 @@ const GameSandbox: FC = () => {
                                             </div>
                                             <span className="text-xs font-bold text-purple-300 uppercase tracking-wider mb-1 block">Story Mode</span>
                                             <h3 className="text-2xl font-black text-white italic">CAMPAIGN</h3>
-                                            <p className="text-[10px] text-purple-200/70 mt-1">Beat levels & bosses to win.</p>
+                                            <p className="text-[10px] text-purple-200/70 mt-1">Beat levels &amp; bosses to win.</p>
                                             <span className="absolute bottom-4 right-4 text-[10px] text-white/50 font-mono">HI: {highScores.campaign}</span>
                                         </button>
 
@@ -2294,7 +2411,7 @@ const GameSandbox: FC = () => {
                                             <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400 font-black text-lg">∞</div>
                                             <div className="flex-1 text-left">
                                                 <h3 className="text-sm font-bold text-white">Survival</h3>
-                                                <p className="text-[10px] text-slate-400">Don't let bricks fall</p>
+                                                <p className="text-[10px] text-slate-400">Don&apos;t let bricks fall</p>
                                             </div>
                                             <span className="text-[10px] text-slate-500 font-mono">HI: {highScores.survival}</span>
                                         </button>
@@ -2329,6 +2446,15 @@ const GameSandbox: FC = () => {
                                 <h2 className="text-2xl font-black text-white mb-4 mt-2 shrink-0">HOW TO PLAY</h2>
                                 
                                 <div className="w-full max-w-xs space-y-3 text-sm text-slate-300 overflow-y-auto pb-20 px-1 custom-scrollbar">
+                                    <div className="bg-slate-800/50 p-3 rounded-xl border border-white/10">
+                                        <h3 className="text-green-400 font-bold mb-1 text-xs uppercase tracking-wider">New Update</h3>
+                                        <ul className="list-disc pl-4 space-y-1 text-[10px]">
+                                            <li><strong className="text-white">Touch Controls:</strong> Drag anywhere to move!</li>
+                                            <li><strong className="text-white">Duel AI:</strong> Smarter &amp; fairer.</li>
+                                            <li><strong className="text-white">Boss Rush:</strong> Performance fixes.</li>
+                                        </ul>
+                                    </div>
+
                                     <div className="bg-slate-800/50 p-3 rounded-xl border border-white/10">
                                         <h3 className="text-cyan-400 font-bold mb-1 text-xs uppercase tracking-wider">Controls</h3>
                                         <ul className="list-disc pl-4 space-y-1 text-xs">
@@ -2535,7 +2661,7 @@ const GameSandbox: FC = () => {
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"/>
                 <span>Drag to move</span>
                 <span className="text-slate-600">•</span>
-                <span>Click to release</span>
+                <span>Tap to release</span>
             </div>
         </div>
     );
